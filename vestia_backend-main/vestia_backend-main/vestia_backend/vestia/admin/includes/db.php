@@ -2,17 +2,16 @@
 // ============================================================
 // VESTIA ADMIN — Database Connection
 // ============================================================
-
 // ✅ Render يوفر هذه المتغيرات تلقائياً عند إنشاء قاعدة بيانات PostgreSQL
-define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
-define('DB_NAME', getenv('DB_NAME') ?: 'vestia_db');
-define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: '');
+define('DB_HOST', getenv('DB_HOST') ?: 'dpg-d84grr3tqb8s73fcadn0-a.oregon-postgres.render.com');
+define('DB_NAME', getenv('DB_NAME') ?: 'my_fashion_db_dpp9');
+define('DB_USER', getenv('DB_USER') ?: 'my_fashion_db_dpp9_user');
+define('DB_PASS', getenv('DB_PASS') ?: 'BI7j11oBO6Mvw5vFXxzFOtTnBReLcNgn');
 
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
-        $dsn = 'pgsql:host=' . DB_HOST . ';port=5432;dbname=' . DB_NAME;
+        $dsn = 'pgsql:host=' . DB_HOST . ';port=5432;dbname=' . DB_NAME . ';sslmode=require';
         $pdo = new PDO($dsn, DB_USER, DB_PASS, [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
