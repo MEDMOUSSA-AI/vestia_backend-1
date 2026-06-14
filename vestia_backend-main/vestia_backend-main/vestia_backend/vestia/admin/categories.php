@@ -9,19 +9,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
-        $name    = sanitize($_POST['name']    ?? '');
-        $nameAr  = sanitize($_POST['name_ar'] ?? '');
-        $nameFr  = sanitize($_POST['name_fr'] ?? '');
-        $slug    = strtolower(preg_replace('/[^a-z0-9]+/i', '-', trim($name)));
-        if ($name) {
-            $maxOrder = $db->query('SELECT COALESCE(MAX(sort_order),0)+1 FROM categories')->fetchColumn();
-            try {
-                $db->prepare('INSERT INTO categories (name, name_ar, name_fr, slug, sort_order) VALUES (?,?,?,?,?)')
-                   ->execute([$name, $nameAr ?: null, $nameFr ?: null, $slug, $maxOrder]);
-                flash('success', 'Category added!');
-            } catch (PDOException $e) {
-                flash('error', 'Category already exists.');
-            }
+        $name   = sanitize($_POST['name']    ?? '');
+        $nameAr = sanitize($_POST['name_ar'] ?? '');
+        $nameFr = sanitize($_POST['name_fr'] ?? '');
+
+        // ✅ التحقق من الطول
+        if (strlen($name) < 2 || strlen($name) > 100) {
+            flash('error', 'Category name must be between 2 and 100 characters.');
+            header('Location: /admin/categories.php'); exit;
+        }
+
+        $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', trim($name)));
+        $slug = trim($slug, '-'); // ✅ إزالة الشرطات من البداية والنهاية
+
+        $maxOrder = $db->query('SELECT COALESCE(MAX(sort_order),0)+1 FROM categories')->fetchColumn();
+        try {
+            $db->prepare('INSERT INTO categories (name, name_ar, name_fr, slug, sort_order) VALUES (?,?,?,?,?)')
+               ->execute([$name, $nameAr ?: null, $nameFr ?: null, $slug, $maxOrder]);
+            flash('success', 'Category added!');
+        } catch (PDOException $e) {
+            flash('error', 'Category already exists.');
         }
         header('Location: /admin/categories.php'); exit;
     }
@@ -31,16 +38,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name   = sanitize($_POST['name']    ?? '');
         $nameAr = sanitize($_POST['name_ar'] ?? '');
         $nameFr = sanitize($_POST['name_fr'] ?? '');
-        if ($name) {
-            $db->prepare('UPDATE categories SET name=?, name_ar=?, name_fr=? WHERE id=?')
-               ->execute([$name, $nameAr ?: null, $nameFr ?: null, $id]);
-            flash('success', 'Category updated!');
+
+        // ✅ التحقق من الـ ID والطول
+        if (!$id) { flash('error', 'Invalid category.'); header('Location: /admin/categories.php'); exit; }
+        if (strlen($name) < 2 || strlen($name) > 100) {
+            flash('error', 'Category name must be between 2 and 100 characters.');
+            header('Location: /admin/categories.php'); exit;
         }
+
+        $db->prepare('UPDATE categories SET name=?, name_ar=?, name_fr=? WHERE id=?')
+           ->execute([$name, $nameAr ?: null, $nameFr ?: null, $id]);
+        flash('success', 'Category updated!');
         header('Location: /admin/categories.php'); exit;
     }
 
     if ($action === 'delete') {
         $id = (int)$_POST['id'];
+
+        // ✅ التحقق من الـ ID
+        if (!$id) { flash('error', 'Invalid category.'); header('Location: /admin/categories.php'); exit; }
+
         $db->prepare("DELETE FROM categories WHERE id=? AND slug != 'all'")->execute([$id]);
         flash('success', 'Category deleted.');
         header('Location: /admin/categories.php'); exit;
@@ -50,9 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Edit mode
 $editCat = null;
 if (isset($_GET['edit'])) {
-    $stmt = $db->prepare('SELECT * FROM categories WHERE id=?');
-    $stmt->execute([(int)$_GET['edit']]);
-    $editCat = $stmt->fetch();
+    $editId = (int)$_GET['edit']; // ✅ تحويل لـ int مباشرة
+    if ($editId) {
+        $stmt = $db->prepare('SELECT * FROM categories WHERE id=?');
+        $stmt->execute([$editId]);
+        $editCat = $stmt->fetch();
+    }
 }
 
 $categories = $db->query(
@@ -85,26 +105,26 @@ include __DIR__ . '/includes/header.php';
           <input type="hidden" name="_csrf" value="<?= csrf() ?>">
           <input type="hidden" name="action" value="<?= $editCat ? 'edit' : 'add' ?>">
           <?php if ($editCat): ?>
-            <input type="hidden" name="id" value="<?= $editCat['id'] ?>">
+            <input type="hidden" name="id" value="<?= (int)$editCat['id'] ?>">
           <?php endif; ?>
 
           <div class="mb-3">
             <label class="form-label">Category Name (EN) *</label>
-            <input type="text" name="name" class="form-control"
+            <input type="text" name="name" class="form-control" maxlength="100"
                    placeholder="e.g. Dresses"
                    value="<?= htmlspecialchars($editCat['name'] ?? '') ?>" required>
           </div>
 
           <div class="mb-3">
             <label class="form-label">الاسم بالعربية <span class="text-muted" style="font-size:12px">(اختياري)</span></label>
-            <input type="text" name="name_ar" class="form-control" dir="rtl"
+            <input type="text" name="name_ar" class="form-control" dir="rtl" maxlength="100"
                    placeholder="مثال: فساتين"
                    value="<?= htmlspecialchars($editCat['name_ar'] ?? '') ?>">
           </div>
 
           <div class="mb-3">
             <label class="form-label">Nom en Français <span class="text-muted" style="font-size:12px">(optionnel)</span></label>
-            <input type="text" name="name_fr" class="form-control"
+            <input type="text" name="name_fr" class="form-control" maxlength="100"
                    placeholder="ex: Robes"
                    value="<?= htmlspecialchars($editCat['name_fr'] ?? '') ?>">
           </div>
@@ -139,17 +159,17 @@ include __DIR__ . '/includes/header.php';
               <td dir="rtl" style="font-size:13px"><?= htmlspecialchars($cat['name_ar'] ?? '—') ?></td>
               <td style="font-size:13px"><?= htmlspecialchars($cat['name_fr'] ?? '—') ?></td>
               <td><code style="font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:4px"><?= htmlspecialchars($cat['slug']) ?></code></td>
-              <td><?= $cat['product_count'] ?></td>
+              <td><?= (int)$cat['product_count'] ?></td>
               <td>
                 <?php if ($cat['slug'] !== 'all'): ?>
                 <div class="d-flex gap-1">
-                  <a href="/admin/categories.php?edit=<?= $cat['id'] ?>" class="btn-icon">
+                  <a href="/admin/categories.php?edit=<?= (int)$cat['id'] ?>" class="btn-icon">
                     <i class="bi bi-pencil"></i>
                   </a>
                   <form method="POST" class="d-inline">
                     <input type="hidden" name="_csrf" value="<?= csrf() ?>">
                     <input type="hidden" name="action" value="delete">
-                    <input type="hidden" name="id" value="<?= $cat['id'] ?>">
+                    <input type="hidden" name="id" value="<?= (int)$cat['id'] ?>">
                     <button type="submit" class="btn-icon danger"
                             data-confirm="Delete '<?= htmlspecialchars($cat['name']) ?>'? Products will be unassigned.">
                       <i class="bi bi-trash"></i>
