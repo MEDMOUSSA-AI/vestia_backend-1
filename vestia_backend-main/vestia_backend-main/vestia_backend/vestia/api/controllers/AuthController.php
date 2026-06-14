@@ -11,26 +11,24 @@ class AuthController {
 
         // Validation
         $errors = [];
-        if (strlen($name) < 2) $errors['name'] = 'Name must be at least 2 characters.';
+        if (strlen($name) < 2 || strlen($name) > 100) $errors['name'] = 'Name must be between 2 and 100 characters.';
         if (!preg_match('/^\+?[0-9]{8,15}$/', $phone)) $errors['phone'] = 'Invalid phone number.';
-        if (strlen($pass) < 6) $errors['password'] = 'Password must be at least 6 characters.';
+        if (strlen($pass) < 8) $errors['password'] = 'Password must be at least 8 characters.';
+        if (!preg_match('/[A-Za-z]/', $pass) || !preg_match('/[0-9]/', $pass)) {
+            $errors['password'] = 'Password must contain letters and numbers.';
+        }
         if (!empty($errors)) jsonError('Validation failed', 422, $errors);
 
         $db = getDB();
-
-        // Check duplicate phone
         $check = $db->prepare('SELECT id FROM users WHERE phone = ?');
         $check->execute([$phone]);
         if ($check->fetch()) jsonError('Phone number already registered', 409);
 
-        // Insert user
         $hash = password_hash($pass, PASSWORD_BCRYPT, ['cost' => 12]);
-        // ✅ RETURNING id بدلاً من lastInsertId() (PostgreSQL لا يدعمها بشكل موثوق)
         $stmt = $db->prepare('INSERT INTO users (name, phone, password) VALUES (?, ?, ?) RETURNING id');
         $stmt->execute([$name, $phone, $hash]);
         $userId = (int)$stmt->fetchColumn();
 
-        // Create token
         $token  = generateToken();
         $expiry = date('Y-m-d H:i:s', time() + TOKEN_EXPIRY);
         $db->prepare('INSERT INTO auth_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
@@ -49,6 +47,9 @@ class AuthController {
 
         if (!$phone || !$pass) jsonError('Phone and password are required', 422);
 
+        // تأخير للحماية من Brute Force
+        usleep(300000);
+
         $db   = getDB();
         $stmt = $db->prepare('SELECT * FROM users WHERE phone = ?');
         $stmt->execute([$phone]);
@@ -59,7 +60,6 @@ class AuthController {
         }
         if (!$user['is_active']) jsonError('Account is suspended', 403);
 
-        // Create token
         $token  = generateToken();
         $expiry = date('Y-m-d H:i:s', time() + TOKEN_EXPIRY);
         $db->prepare('INSERT INTO auth_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
@@ -80,10 +80,8 @@ class AuthController {
         $user    = getAuthUser();
         $headers = getallheaders();
         $token   = trim(substr($headers['Authorization'] ?? $headers['authorization'] ?? '', 7));
-
         $db = getDB();
         $db->prepare('DELETE FROM auth_tokens WHERE token = ?')->execute([$token]);
-
         jsonSuccess([], 'Logged out successfully');
     }
 }
