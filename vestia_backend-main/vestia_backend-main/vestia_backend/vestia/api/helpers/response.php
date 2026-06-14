@@ -2,7 +2,6 @@
 // ============================================================
 // VESTIA API — Response Helpers
 // ============================================================
-
 function jsonSuccess($data = [], string $message = 'Success', int $code = 200): void {
     http_response_code($code);
     echo json_encode([
@@ -22,6 +21,12 @@ function jsonError(string $message = 'Error', int $code = 400, array $errors = [
 }
 
 function getRequestBody(): array {
+    // ✅ منع الطلبات الأكبر من 64 KB
+    $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($contentLength > 65536) {
+        jsonError('Request body too large', 413);
+    }
+
     $raw  = file_get_contents('php://input');
     $data = json_decode($raw, true);
     return is_array($data) ? $data : [];
@@ -31,11 +36,10 @@ function sanitize($value): string {
     return htmlspecialchars(strip_tags(trim((string)$value)), ENT_QUOTES, 'UTF-8');
 }
 
-// ✅ إصلاح 3 — تحويل المسار المحلي إلى رابط كامل
 function fixImageUrl(?string $imageUrl): ?string {
     if (!$imageUrl) return null;
-    if (strpos($imageUrl, 'http') === 0) return $imageUrl; // رابط كامل، OK
-    if (strpos($imageUrl, '/') === 0) {                    // مسار محلي
+    if (strpos($imageUrl, 'http') === 0) return $imageUrl;
+    if (strpos($imageUrl, '/') === 0) {
         $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
         return "{$protocol}://{$_SERVER['HTTP_HOST']}{$imageUrl}";
     }
