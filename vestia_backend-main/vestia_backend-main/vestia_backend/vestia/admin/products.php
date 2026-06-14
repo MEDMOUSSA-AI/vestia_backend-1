@@ -165,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 flash('success', 'تم تحديث المنتج! ✅');
             }
-            header('Location: https://vestia-backend-1.onrender.com/admin/products.php'); exit;
+            header('Location: https://vestia-backend-2.onrender.com/admin/products.php'); exit;
         }
     }
 
@@ -173,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)$_POST['id'];
         $db->prepare('UPDATE products SET is_active=0 WHERE id=?')->execute([$id]);
         flash('success', 'تم إخفاء المنتج.');
-        header('Location: https://vestia-backend-1.onrender.com/admin/products.php'); exit;
+        header('Location: https://vestia-backend-2.onrender.com/admin/products.php'); exit;
     }
 }
 
@@ -250,7 +250,7 @@ include __DIR__ . '/includes/header.php';
       <div class="card-header">
         <h5><i class="bi bi-bag-plus me-2"></i><?= $editProduct ? 'تعديل منتج' : 'إضافة منتج جديد' ?></h5>
         <?php if ($editProduct): ?>
-          <a href="https://vestia-backend-1.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary ms-auto">إلغاء</a>
+          <a href="https://vestia-backend-2.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary ms-auto">إلغاء</a>
         <?php endif; ?>
       </div>
       <div class="p-4">
@@ -376,7 +376,7 @@ include __DIR__ . '/includes/header.php';
             </small>
           </div>
 
-          <!-- ✅ نهاية العرض (سهل الاستخدام) -->
+          <!-- ✅ نهاية العرض (سهل جداً) -->
           <div class="mb-3">
             <label class="form-label d-flex align-items-center gap-2">
               <i class="bi bi-hourglass-split" style="color:#f59e0b"></i>تاريخ انتهاء العرض
@@ -442,7 +442,7 @@ include __DIR__ . '/includes/header.php';
           </select>
           <button class="btn btn-sm btn-dark">تصفية</button>
           <?php if ($search || $catFilt): ?>
-            <a href="https://vestia-backend-1.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary">إعادة تعيين</a>
+            <a href="https://vestia-backend-2.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary">إعادة تعيين</a>
           <?php endif; ?>
         </form>
       </div>
@@ -518,7 +518,7 @@ include __DIR__ . '/includes/header.php';
               </td>
               <td>
                 <div class="d-flex gap-1">
-                  <a href="https://vestia-backend-1.onrender.com/admin/products.php?edit=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary" title="تعديل"><i class="bi bi-pencil"></i></a>
+                  <a href="https://vestia-backend-2.onrender.com/admin/products.php?edit=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary" title="تعديل"><i class="bi bi-pencil"></i></a>
                   <form method="POST" class="d-inline">
                     <input type="hidden" name="_csrf" value="<?= csrf() ?>">
                     <input type="hidden" name="action" value="delete">
