@@ -3,11 +3,15 @@
 // VESTIA API — Review Controller
 // ============================================================
 class ReviewController {
+
     public static function index(string $productId): void {
-        $db    = getDB();
-        $page  = max(1, (int)($_GET['page']  ?? 1));
-        $limit = min(20, (int)($_GET['limit'] ?? 10));
-        $offset= ($page - 1) * $limit;
+        // ✅ التحقق من أن الـ ID رقم صحيح
+        if (!ctype_digit($productId)) jsonError('Invalid product ID', 422);
+
+        $db     = getDB();
+        $page   = max(1, (int)($_GET['page']  ?? 1));
+        $limit  = min(20, (int)($_GET['limit'] ?? 10));
+        $offset = ($page - 1) * $limit;
 
         $stmt = $db->prepare(
             "SELECT r.id, r.rating, r.text, r.created_at,
@@ -21,7 +25,6 @@ class ReviewController {
         $stmt->execute([$productId]);
         $reviews = $stmt->fetchAll();
 
-        // ✅ COALESCE بدلاً من IFNULL و CAST لـ SUM
         $stats = $db->prepare(
             'SELECT COALESCE(AVG(rating)::numeric, 0) AS avg, COUNT(*) AS total,
                     COALESCE(SUM(CASE WHEN rating=5 THEN 1 ELSE 0 END), 0) AS s5,
@@ -43,10 +46,16 @@ class ReviewController {
     }
 
     public static function store(string $productId): void {
+        // ✅ التحقق من أن الـ ID رقم صحيح
+        if (!ctype_digit($productId)) jsonError('Invalid product ID', 422);
+
         $user    = getAuthUser();
         $body    = getRequestBody();
         $rating  = (int)($body['rating'] ?? 0);
-        $text    = sanitize($body['text'] ?? '');
+
+        // ✅ تحديد حد أقصى لطول نص التقييم
+        $text    = mb_substr(sanitize($body['text'] ?? ''), 0, 1000);
+
         $orderId = isset($body['order_id']) ? (int)$body['order_id'] : null;
 
         if ($rating < 1 || $rating > 5) jsonError('Rating must be between 1 and 5', 422);
@@ -59,6 +68,7 @@ class ReviewController {
 
         $dup = $db->prepare('SELECT id FROM reviews WHERE user_id = ? AND product_id = ?');
         $dup->execute([$user['id'], $productId]);
+
         if ($dup->fetch()) {
             $db->prepare('UPDATE reviews SET rating=?, text=?, order_id=? WHERE user_id=? AND product_id=?')
                ->execute([$rating, $text, $orderId, $user['id'], $productId]);
