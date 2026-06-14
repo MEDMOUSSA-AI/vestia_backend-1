@@ -4,14 +4,9 @@
 // ============================================================
 class CartController {
 
-    /**
-     * Helper method to get formatted cart items
-     * Fixes image URLs and returns cart summary
-     */
     private static function getCartData($userId): array {
         $db = getDB();
         
-        // ✅ يجلب الأسماء بالثلاث لغات
         $stmt = $db->prepare(
             "SELECT c.id, c.quantity, c.size,
                     p.id AS product_id, p.name, p.name_ar, p.name_fr,
@@ -24,15 +19,8 @@ class CartController {
         $stmt->execute([$userId]);
         $items = $stmt->fetchAll();
 
-        // ✅ FIX IMAGE URLs + fallback للأسماء
         $items = array_map(function($item) {
-            $imageUrl = $item['image_url'];
-            if ($imageUrl && strpos($imageUrl, 'http') !== 0 && strpos($imageUrl, '/') === 0) {
-                $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'];
-                $item['image_url'] = "{$protocol}://{$host}{$imageUrl}";
-            }
-            // ✅ fallback: إذا كان name_ar أو name_fr فارغاً يرجع الاسم الإنجليزي
+            $item['image_url'] = fixImageUrl($item['image_url']);
             $item['name_ar'] = $item['name_ar'] ?: $item['name'];
             $item['name_fr'] = $item['name_fr'] ?: $item['name'];
             return $item;
@@ -61,8 +49,13 @@ class CartController {
         $body = getRequestBody();
 
         $productId = (int)($body['product_id'] ?? 0);
-        $quantity  = max(1, (int)($body['quantity'] ?? 1));
+        // ✅ تحديد الحد الأقصى للكمية منعاً للتلاعب
+        $quantity  = min(99, max(1, (int)($body['quantity'] ?? 1)));
         $size      = strtoupper(sanitize($body['size'] ?? 'M'));
+
+        // ✅ التحقق من أن الـ size صحيح
+        $allowedSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+        if (!in_array($size, $allowedSizes)) jsonError('Invalid size', 422);
 
         if (!$productId) jsonError('product_id is required', 422);
 
@@ -85,10 +78,11 @@ class CartController {
 
     public static function update(?string $id): void {
         $user = getAuthUser();
-        if (!$id) jsonError('Cart item ID required', 422);
+        if (!$id || !ctype_digit($id)) jsonError('Cart item ID required', 422);
 
         $body     = getRequestBody();
-        $quantity = (int)($body['quantity'] ?? 0);
+        // ✅ تحديد الحد الأقصى للكمية منعاً للتلاعب
+        $quantity = min(99, (int)($body['quantity'] ?? 0));
         $db       = getDB();
 
         if ($quantity <= 0) {
@@ -105,7 +99,7 @@ class CartController {
 
     public static function remove(?string $id): void {
         $user = getAuthUser();
-        if (!$id) jsonError('Cart item ID required', 422);
+        if (!$id || !ctype_digit($id)) jsonError('Cart item ID required', 422);
 
         $db = getDB();
         $db->prepare('DELETE FROM cart_items WHERE id = ? AND user_id = ?')
