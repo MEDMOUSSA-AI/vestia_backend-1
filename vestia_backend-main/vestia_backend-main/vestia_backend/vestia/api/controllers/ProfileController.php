@@ -3,14 +3,17 @@
 // VESTIA API — Profile Controller
 // ============================================================
 class ProfileController {
+
     public static function show(): void {
         $user = getAuthUser();
         $db   = getDB();
-        // ✅ جلب phone بدلاً من email
+
         $stmt = $db->prepare('SELECT id, name, phone, created_at FROM users WHERE id = ?');
         $stmt->execute([$user['id']]);
         $profile = $stmt->fetch();
+
         if (!$profile) jsonError('User not found', 404);
+
         jsonSuccess(['user' => $profile]);
     }
 
@@ -19,18 +22,31 @@ class ProfileController {
         $body = getRequestBody();
         $db   = getDB();
 
-        $name  = trim($body['name']  ?? '');
+        $name  = sanitize(trim($body['name']  ?? ''));
         $phone = trim($body['phone'] ?? '');
         $pass  = $body['password']   ?? '';
 
         // ── Validation ──
         $errors = [];
+
+        // ✅ حد أقصى لطول الاسم
+        if ($name && strlen($name) > 100) {
+            $errors['name'] = 'Name is too long';
+        }
+
         if ($phone && !preg_match('/^\+?[0-9]{8,15}$/', $phone)) {
             $errors['phone'] = 'Invalid phone number';
         }
-        if ($pass && strlen($pass) < 6) {
-            $errors['password'] = 'Password must be 6+ characters';
+
+        // ✅ تحديث شروط كلمة المرور لتتطابق مع التسجيل (8 أحرف + أرقام وحروف)
+        if ($pass) {
+            if (strlen($pass) < 8) {
+                $errors['password'] = 'Password must be at least 8 characters';
+            } elseif (!preg_match('/[A-Za-z]/', $pass) || !preg_match('/[0-9]/', $pass)) {
+                $errors['password'] = 'Password must contain letters and numbers';
+            }
         }
+
         if (!empty($errors)) jsonError('Validation failed', 422, $errors);
 
         $fields = [];
@@ -42,7 +58,6 @@ class ProfileController {
         }
 
         if ($phone) {
-            // التحقق أن رقم الهاتف غير مستخدم من مستخدم آخر
             $dup = $db->prepare('SELECT id FROM users WHERE phone = ? AND id != ?');
             $dup->execute([$phone, $user['id']]);
             if ($dup->fetch()) jsonError('Phone number already in use', 409);
