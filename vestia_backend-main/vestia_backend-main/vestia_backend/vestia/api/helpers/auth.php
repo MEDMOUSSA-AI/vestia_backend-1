@@ -14,8 +14,13 @@ function getAuthUser(): array {
     }
 
     $token = trim(substr($authHeader, 7));
-    $db    = getDB();
 
+    // ✅ التحقق من صيغة الـ token (يجب أن يكون 64 حرفاً hex فقط)
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+        jsonError('Unauthorized — Invalid token format', 401);
+    }
+
+    $db   = getDB();
     $stmt = $db->prepare(
         'SELECT u.id, u.name, u.phone, u.avatar, u.is_active
          FROM auth_tokens t
