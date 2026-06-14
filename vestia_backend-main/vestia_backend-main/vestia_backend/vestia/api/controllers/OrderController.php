@@ -7,7 +7,12 @@ class OrderController {
     public static function index(): void {
         $user   = getAuthUser();
         $db     = getDB();
+
+        // ✅ التحقق من أن status قيمة مسموح بها فقط
         $status = $_GET['status'] ?? null;
+        if ($status !== null && !in_array($status, ['ongoing', 'completed'])) {
+            $status = null;
+        }
 
         $where  = ['o.user_id = ?'];
         $params = [$user['id']];
@@ -30,7 +35,6 @@ class OrderController {
         $orders = $stmt->fetchAll();
 
         foreach ($orders as &$order) {
-            // ✅ يجلب الأسماء بالثلاث لغات
             $items = $db->prepare(
                 'SELECT oi.id, oi.name, oi.name_ar, oi.name_fr,
                         oi.image_url, oi.price, oi.quantity, oi.size, oi.product_id
@@ -41,12 +45,9 @@ class OrderController {
 
             foreach ($order['items'] as &$item) {
                 $item['image_url'] = fixImageUrl($item['image_url']);
+                $item['name_ar']   = $item['name_ar'] ?: $item['name'];
+                $item['name_fr']   = $item['name_fr'] ?: $item['name'];
 
-                // ✅ fallback: إذا كان name_ar أو name_fr فارغاً يرجع الاسم الإنجليزي
-                $item['name_ar'] = $item['name_ar'] ?: $item['name'];
-                $item['name_fr'] = $item['name_fr'] ?: $item['name'];
-
-                // ✅ التحقق من التقييم مرتبط بالطلبية تحديداً
                 try {
                     $rev = $db->prepare(
                         'SELECT id, rating FROM reviews
@@ -54,7 +55,6 @@ class OrderController {
                     );
                     $rev->execute([$user['id'], $item['product_id'], $order['id']]);
                 } catch (\Exception $e) {
-                    // fallback: إذا لم يكن عمود order_id موجوداً بعد
                     $rev = $db->prepare(
                         'SELECT id, rating FROM reviews
                          WHERE user_id = ? AND product_id = ?'
@@ -73,7 +73,11 @@ class OrderController {
 
     public static function show(string $id): void {
         $user = getAuthUser();
-        $db   = getDB();
+
+        // ✅ التحقق من أن الـ ID رقم صحيح
+        if (!ctype_digit($id)) jsonError('Invalid order ID', 422);
+
+        $db = getDB();
 
         $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?');
         $stmt->execute([$id, $user['id']]);
@@ -81,7 +85,6 @@ class OrderController {
 
         if (!$order) jsonError('Order not found', 404);
 
-        // ✅ يجلب الأسماء بالثلاث لغات
         $items = $db->prepare(
             'SELECT oi.id, oi.name, oi.name_ar, oi.name_fr,
                     oi.image_url, oi.price, oi.quantity, oi.size, oi.product_id
@@ -104,7 +107,6 @@ class OrderController {
         $user = getAuthUser();
         $db   = getDB();
 
-        // ✅ يجلب الأسماء بالثلاث لغات من جدول products
         $stmt = $db->prepare(
             "SELECT c.quantity, c.size, p.id AS product_id,
                     p.name, p.name_ar, p.name_fr,
@@ -130,7 +132,6 @@ class OrderController {
             $insertStmt->execute([$user['id'], 'Packing', $subtotal, $shippingFee, 0, $total]);
             $orderId = (int)$insertStmt->fetchColumn();
 
-            // ✅ يحفظ الأسماء بالثلاث لغات في order_items
             $insertItem = $db->prepare(
                 'INSERT INTO order_items
                  (order_id, product_id, name, name_ar, name_fr, image_url, price, quantity, size)
@@ -157,7 +158,8 @@ class OrderController {
 
         } catch (Exception $e) {
             $db->rollBack();
-           jsonError($e->getMessage(), 500); // ← مؤقت
+            // ✅ إخفاء تفاصيل الخطأ عن المستخدم
+            jsonError('Failed to place order. Please try again.', 500);
         }
     }
 }
