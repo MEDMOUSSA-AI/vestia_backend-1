@@ -5,16 +5,17 @@
 
 class ProductController {
 
-    /** 
-     * ✅ جلب قائمة المنتجات مع الفلاترة والبحث والترجمة
-     */
     public static function index(): void {
-        $db = getDB();
-        $userId = $_SESSION['user_id'] ?? null;
+        $db     = getDB();
+        $user   = null;
+        try { $user = getAuthUser(); } catch (\Throwable $e) {}
+        $userId = $user ? (int)$user['id'] : null;
 
+        // ✅ التحقق من قيم المدخلات
         $categoryId = isset($_GET['category_id']) ? (int)$_GET['category_id'] : null;
-        $search     = $_GET['search']   ?? null;
-        $lang       = $_GET['lang']     ?? 'en';
+        $search     = isset($_GET['search']) ? mb_substr(trim($_GET['search']), 0, 100) : null;
+        $lang       = $_GET['lang'] ?? 'en';
+        if (!in_array($lang, ['en', 'ar', 'fr'])) $lang = 'en';
         $page       = max(1, (int)($_GET['page']  ?? 1));
         $limit      = min(50, max(1, (int)($_GET['limit'] ?? 20)));
         $offset     = ($page - 1) * $limit;
@@ -34,6 +35,13 @@ class ProductController {
 
         $whereSQL = implode(' AND ', $where);
 
+        // ✅ إصلاح ثغرة SQL Injection — استخدام parameter بدلاً من إدراج $userId مباشرة
+        $savedJoin = $userId
+            ? 'LEFT JOIN saved_items sp ON sp.product_id = p.id AND sp.user_id = ?'
+            : 'LEFT JOIN saved_items sp ON FALSE';
+
+        if ($userId) $params[] = $userId;
+
         $sql = "SELECT p.id, p.name, p.name_ar, p.name_fr, 
                        p.description, p.description_ar, p.description_fr,
                        p.price, p.old_price,
@@ -47,8 +55,7 @@ class ProductController {
                 FROM products p
                 LEFT JOIN categories c ON c.id = p.category_id
                 LEFT JOIN reviews    r ON r.product_id = p.id
-                LEFT JOIN saved_items sp ON sp.product_id = p.id 
-                    AND sp.user_id = " . ($userId ? $userId : 'NULL') . "
+                {$savedJoin}
                 WHERE {$whereSQL}
                 GROUP BY p.id, p.name, p.name_ar, p.name_fr, 
                          p.description, p.description_ar, p.description_fr,
@@ -63,10 +70,10 @@ class ProductController {
         $stmt->execute($params);
         $products = $stmt->fetchAll();
 
-        // Total count
         $countSql  = "SELECT COUNT(*) FROM products p WHERE {$whereSQL}";
+        $countParams = array_slice($params, 0, $userId ? count($params) - 1 : count($params));
         $countStmt = $db->prepare($countSql);
-        $countStmt->execute($params);
+        $countStmt->execute($countParams);
         $total = (int)$countStmt->fetchColumn();
 
         jsonSuccess([
@@ -78,13 +85,24 @@ class ProductController {
         ]);
     }
 
-    /**
-     * ✅ جلب تفاصيل منتج واحد
-     */
     public static function show(string $id): void {
+        // ✅ التحقق من أن الـ ID رقم صحيح
+        if (!ctype_digit($id)) jsonError('Invalid product ID', 422);
+
         $db   = getDB();
         $lang = $_GET['lang'] ?? 'en';
-        $userId = $_SESSION['user_id'] ?? null;
+        if (!in_array($lang, ['en', 'ar', 'fr'])) $lang = 'en';
+
+        $user   = null;
+        try { $user = getAuthUser(); } catch (\Throwable $e) {}
+        $userId = $user ? (int)$user['id'] : null;
+
+        // ✅ إصلاح ثغرة SQL Injection — استخدام parameter بدلاً من إدراج $userId مباشرة
+        $savedJoin = $userId
+            ? 'LEFT JOIN saved_items sp ON sp.product_id = p.id AND sp.user_id = ?'
+            : 'LEFT JOIN saved_items sp ON FALSE';
+
+        $params = $userId ? [$id, $userId] : [$id];
 
         $sql = "SELECT p.id, p.name, p.name_ar, p.name_fr, 
                        p.description, p.description_ar, p.description_fr,
@@ -99,8 +117,7 @@ class ProductController {
                 FROM products p
                 LEFT JOIN categories c ON c.id = p.category_id
                 LEFT JOIN reviews    r ON r.product_id = p.id
-                LEFT JOIN saved_items sp ON sp.product_id = p.id 
-                    AND sp.user_id = " . ($userId ? $userId : 'NULL') . "
+                {$savedJoin}
                 WHERE p.id = ? AND p.is_active = 1
                 GROUP BY p.id, p.name, p.name_ar, p.name_fr, 
                          p.description, p.description_ar, p.description_fr,
@@ -110,7 +127,7 @@ class ProductController {
                          sp.id";
 
         $stmt = $db->prepare($sql);
-        $stmt->execute([$id]);
+        $stmt->execute($params);
         $product = $stmt->fetch();
 
         if (!$product) jsonError('Product not found', 404);
@@ -118,9 +135,6 @@ class ProductController {
         jsonSuccess(['product' => self::format($product, $lang)]);
     }
 
-    /**
-     * ✅ تحويل البيانات إلى JSON Response
-     */
     private static function format(array $p, string $lang = 'en'): array {
         $discount = null;
         if ($p['old_price'] && $p['old_price'] > $p['price']) {
@@ -172,9 +186,6 @@ class ProductController {
         ];
     }
 
-    /**
-     * ✅ تحويل المقاسات من نص إلى array
-     */
     private static function parseSizes(string $sizes): array {
         return array_filter(
             array_map('trim', explode(',', $sizes)),
@@ -182,15 +193,13 @@ class ProductController {
         );
     }
 
-    /**
-     * ✅ API للبحث السريع
-     */
     public static function search(): void {
         $db = getDB();
-        $q  = $_GET['q']    ?? '';
+        $q    = mb_substr(trim($_GET['q'] ?? ''), 0, 100);
         $lang = $_GET['lang'] ?? 'en';
+        if (!in_array($lang, ['en', 'ar', 'fr'])) $lang = 'en';
 
-        if (strlen($q) < 2) {
+        if (mb_strlen($q) < 2) {
             jsonError('Query too short', 400);
         }
 
