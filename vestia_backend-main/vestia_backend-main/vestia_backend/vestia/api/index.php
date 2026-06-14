@@ -2,8 +2,8 @@
 // ============================================================
 // VESTIA API — Main Router  (api/index.php)
 // ============================================================
-error_reporting(E_ALL);  
-ini_set('display_errors', 1);
+error_reporting(0);
+ini_set('display_errors', 0);
 // ── CORS ──
 header('Content-Type: application/json; charset=UTF-8');
 header('Access-Control-Allow-Origin: *');
@@ -35,37 +35,43 @@ $segments    = array_values(array_filter(explode('/', trim($path, '/'))));
 $resource  = $segments[0] ?? '';
 $id        = $segments[1] ?? null;
 $sub       = $segments[2] ?? null;
+// ── Rate Limiting ──
+$ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+$ip = explode(',', $ip)[0];
+$rateLimitFile = sys_get_temp_dir() . '/rl_' . md5($ip) . '.json';
+$now = time();
+$requests = [];
+if (file_exists($rateLimitFile)) {
+    $requests = json_decode(file_get_contents($rateLimitFile), true) ?? [];
+}
+$requests = array_filter($requests, fn($t) => $t > $now - 60);
+if (count($requests) >= 100) {
+    http_response_code(429);
+    die(json_encode(['success' => false, 'message' => 'Too many requests. Please wait.']));
+}
+$requests[] = $now;
+file_put_contents($rateLimitFile, json_encode(array_values($requests)));
 // ── Route Table ──
 match(true) {
-    // AUTH
-    // أضفه في جدول الـ Routes
     $resource === 'health' && $method === 'GET' => jsonSuccess(['status' => 'ok']),
     $resource === 'register' && $method === 'POST' => AuthController::register(),
     $resource === 'login'    && $method === 'POST' => AuthController::login(),
     $resource === 'logout'   && $method === 'POST' => AuthController::logout(),
-    // CATEGORIES
     $resource === 'categories' && $method === 'GET' => CategoryController::index(),
-    // PRODUCTS
     $resource === 'products' && $method === 'GET' && $id === null                  => ProductController::index(),
     $resource === 'products' && $method === 'GET' && $id !== null && $sub === null => ProductController::show($id),
-    // REVIEWS
     $resource === 'products' && $id !== null && $sub === 'reviews' && $method === 'GET'  => ReviewController::index($id),
     $resource === 'products' && $id !== null && $sub === 'reviews' && $method === 'POST' => ReviewController::store($id),
-    // SAVED (wishlist)
     $resource === 'saved' && $method === 'GET'    => SavedController::index(),
     $resource === 'saved' && $method === 'POST'   => SavedController::toggle(),
-    // CART
     $resource === 'cart' && $method === 'GET'    => CartController::index(),
     $resource === 'cart' && $method === 'POST'   => CartController::add(),
     $resource === 'cart' && $method === 'PUT'    => CartController::update($id),
     $resource === 'cart' && $method === 'DELETE' => CartController::remove($id),
-    // ORDERS
     $resource === 'orders' && $method === 'GET'  && $id === null => OrderController::index(),
     $resource === 'orders' && $method === 'GET'  && $id !== null => OrderController::show($id),
     $resource === 'orders' && $method === 'POST'                 => OrderController::store(),
-    // PROFILE
     $resource === 'profile' && $method === 'GET' => ProfileController::show(),
     $resource === 'profile' && $method === 'PUT' => ProfileController::update(),
-    // 404
     default => jsonError('Endpoint not found', 404),
 };
