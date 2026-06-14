@@ -8,7 +8,6 @@ class SavedController {
         $user = getAuthUser();
         $db   = getDB();
 
-        // ✅ يجلب الأسماء بالثلاث لغات
         $stmt = $db->prepare(
             "SELECT p.id, p.name, p.name_ar, p.name_fr,
                     p.price, p.old_price, p.image_url,
@@ -24,17 +23,11 @@ class SavedController {
         $stmt->execute([$user['id']]);
         $items = $stmt->fetchAll();
 
-        // ✅ FIX IMAGE URLs + fallback للأسماء
+        // ✅ استخدام fixImageUrl() بدلاً من تكرار الكود
         $items = array_map(function($item) {
-            $imageUrl = $item['image_url'];
-            if ($imageUrl && strpos($imageUrl, 'http') !== 0 && strpos($imageUrl, '/') === 0) {
-                $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'];
-                $item['image_url'] = "{$protocol}://{$host}{$imageUrl}";
-            }
-            // ✅ fallback: إذا كان name_ar أو name_fr فارغاً يرجع الاسم الإنجليزي
-            $item['name_ar'] = $item['name_ar'] ?: $item['name'];
-            $item['name_fr'] = $item['name_fr'] ?: $item['name'];
+            $item['image_url'] = fixImageUrl($item['image_url']);
+            $item['name_ar']   = $item['name_ar'] ?: $item['name'];
+            $item['name_fr']   = $item['name_fr'] ?: $item['name'];
             return $item;
         }, $items);
 
