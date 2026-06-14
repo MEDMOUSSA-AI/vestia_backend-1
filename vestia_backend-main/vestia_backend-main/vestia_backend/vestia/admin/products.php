@@ -1,67 +1,56 @@
 <?php
-// ============================================================
-// 🛠️ ADMIN PANEL: products.php (جاهز للاستخدام الفوري)
-// ============================================================
-
 session_start();
 require_once __DIR__ . '/includes/db.php';
 adminCheck();
 $db = db();
 
-// ✅ Helper function لتنسيق datetime للـ input
 function formatDatetimeForInput(?string $datetime): string {
     if (!$datetime) return '';
     return substr(str_replace(' ', 'T', $datetime), 0, 16);
 }
 
-// ✅ Helper function لحساب المدة المتبقية
 function getTimeRemaining(?string $offerEndsAt): array {
     if (!$offerEndsAt) {
         return ['display' => 'لا يوجد عرض', 'remaining_hours' => 0, 'class' => 'text-muted'];
     }
-    
     $endTime = new DateTime($offerEndsAt);
-    $now = new DateTime();
-    
+    $now     = new DateTime();
     if ($now >= $endTime) {
         return ['display' => '❌ انتهى العرض', 'remaining_hours' => 0, 'class' => 'text-danger'];
     }
-    
-    $interval = $now->diff($endTime);
+    $interval        = $now->diff($endTime);
     $remaining_hours = ($interval->d * 24) + $interval->h;
-    
     if ($remaining_hours > 24) {
-        $days = intdiv($remaining_hours, 24);
+        $days    = intdiv($remaining_hours, 24);
         $display = "⏳ $days أيام المتبقي";
-        $class = 'text-warning';
+        $class   = 'text-warning';
     } else {
         $display = "⏰ $remaining_hours ساعات المتبقي";
-        $class = $remaining_hours < 6 ? 'text-danger' : 'text-warning';
+        $class   = $remaining_hours < 6 ? 'text-danger' : 'text-warning';
     }
-    
     return ['display' => $display, 'remaining_hours' => $remaining_hours, 'class' => $class];
 }
 
-// ── Cloudinary Configuration ──
-define('CLOUDINARY_CLOUD_NAME', 'dyaiu7env');
-define('CLOUDINARY_API_KEY',    '368529122995758');
-define('CLOUDINARY_API_SECRET', 'I-Udh8Hr06mSqWhkbhQeyTk1O5s');
+// ✅ من متغيرات البيئة فقط — لا تضع البيانات في الكود
+define('CLOUDINARY_CLOUD_NAME', getenv('CLOUDINARY_CLOUD_NAME'));
+define('CLOUDINARY_API_KEY',    getenv('CLOUDINARY_API_KEY'));
+define('CLOUDINARY_API_SECRET', getenv('CLOUDINARY_API_SECRET'));
 define('CLOUDINARY_FOLDER',     'vestia/products');
 
 function uploadToCloudinary(string $fileTmpPath, string $originalName): string|false {
-    $timestamp  = time();
-    $folder     = CLOUDINARY_FOLDER;
-    $publicId   = $folder . '/' . pathinfo($originalName, PATHINFO_FILENAME) . '_' . uniqid();
+    $timestamp    = time();
+    $folder       = CLOUDINARY_FOLDER;
+    $publicId     = $folder . '/' . pathinfo($originalName, PATHINFO_FILENAME) . '_' . uniqid();
     $paramsToSign = "folder={$folder}&public_id={$publicId}&timestamp={$timestamp}";
     $signature    = sha1($paramsToSign . CLOUDINARY_API_SECRET);
-    $uploadUrl = 'https://api.cloudinary.com/v1_1/' . CLOUDINARY_CLOUD_NAME . '/image/upload';
-    $postFields = [
-        'file'       => new CURLFile($fileTmpPath),
-        'api_key'    => CLOUDINARY_API_KEY,
-        'timestamp'  => $timestamp,
-        'signature'  => $signature,
-        'folder'     => $folder,
-        'public_id'  => $publicId,
+    $uploadUrl    = 'https://api.cloudinary.com/v1_1/' . CLOUDINARY_CLOUD_NAME . '/image/upload';
+    $postFields   = [
+        'file'      => new CURLFile($fileTmpPath),
+        'api_key'   => CLOUDINARY_API_KEY,
+        'timestamp' => $timestamp,
+        'signature' => $signature,
+        'folder'    => $folder,
+        'public_id' => $publicId,
     ];
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -70,6 +59,7 @@ function uploadToCloudinary(string $fileTmpPath, string $originalName): string|f
         CURLOPT_POSTFIELDS     => $postFields,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 30,
+        CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -79,36 +69,43 @@ function uploadToCloudinary(string $fileTmpPath, string $originalName): string|f
     return $data['secure_url'] ?? false;
 }
 
-// ── Handle actions ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrf();
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add' || $action === 'edit') {
-        // ✅ جميع الحقول المتعددة اللغات
-        $name     = sanitize($_POST['name']    ?? '');
-        $nameAr   = sanitize($_POST['name_ar'] ?? '');
-        $nameFr   = sanitize($_POST['name_fr'] ?? '');
-        
-        // ✅ الأوصاف المتعددة اللغات
-        $desc     = sanitize($_POST['description']    ?? '');
-        $descAr   = sanitize($_POST['description_ar'] ?? '');
-        $descFr   = sanitize($_POST['description_fr'] ?? '');
-        
-        $catId    = (int)($_POST['category_id'] ?? 0) ?: null;
-        $price    = (float)($_POST['price']     ?? 0);
-        $oldPrice = $_POST['old_price'] !== '' ? (float)$_POST['old_price'] : null;
-        $sizes    = sanitize($_POST['sizes']    ?? 'S,M,L,XL,XXL');
-        
-        // ✅ المخزون
-        $stockCount = (int)($_POST['stock_count'] ?? 0);
-        
-        // ✅ نهاية العرض
-        $offerEndsAt = $_POST['offer_ends_at'] !== '' ? sanitize($_POST['offer_ends_at']) : null;
-        
-        $isActive = isset($_POST['is_active']) ? 1 : 0;
+        $name   = sanitize($_POST['name']           ?? '');
+        $nameAr = sanitize($_POST['name_ar']        ?? '');
+        $nameFr = sanitize($_POST['name_fr']        ?? '');
+        $desc   = sanitize($_POST['description']    ?? '');
+        $descAr = sanitize($_POST['description_ar'] ?? '');
+        $descFr = sanitize($_POST['description_fr'] ?? '');
+        $catId  = (int)($_POST['category_id'] ?? 0) ?: null;
+        $price  = (float)($_POST['price'] ?? 0);
 
-        // الصورة
+        // ✅ التحقق من الطول والسعر
+        if (strlen($name) > 200) {
+            flash('error', 'اسم المنتج طويل جداً.');
+            header('Location: /admin/products.php'); exit;
+        }
+        if ($price <= 0 || $price > 9999999) {
+            flash('error', 'السعر غير صحيح.');
+            header('Location: /admin/products.php'); exit;
+        }
+
+        $oldPrice = isset($_POST['old_price']) && $_POST['old_price'] !== ''
+            ? (float)$_POST['old_price'] : null;
+        if ($oldPrice !== null && ($oldPrice <= 0 || $oldPrice > 9999999)) $oldPrice = null;
+
+        $sizes       = mb_substr(sanitize($_POST['sizes'] ?? 'S,M,L,XL,XXL'), 0, 100);
+        $stockCount  = max(0, min(99999, (int)($_POST['stock_count'] ?? 0)));
+        $offerEndsAt = isset($_POST['offer_ends_at']) && $_POST['offer_ends_at'] !== ''
+            ? sanitize($_POST['offer_ends_at']) : null;
+
+        // ✅ التحقق من صيغة التاريخ
+        if ($offerEndsAt && !strtotime($offerEndsAt)) $offerEndsAt = null;
+
+        $isActive = isset($_POST['is_active']) ? 1 : 0;
         $imageUrl = sanitize($_POST['current_image_url'] ?? '');
 
         if (!empty($_FILES['image_file']['name'])) {
@@ -116,7 +113,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
             $maxSize = 5 * 1024 * 1024;
 
-            if (!in_array($file['type'], $allowed)) {
+            // ✅ التحقق من نوع الملف الفعلي وليس فقط المُعلن عنه من المتصفح
+            $finfo    = finfo_open(FILEINFO_MIME_TYPE);
+            $mimeType = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+
+            if (!in_array($mimeType, $allowed, true)) {
                 flash('error', 'نوع الصورة غير مدعوم. المسموح: JPG, PNG, WEBP, GIF.');
             } elseif ($file['size'] > $maxSize) {
                 flash('error', 'حجم الصورة كبير جداً. الحد الأقصى 5 MB.');
@@ -137,56 +139,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             if ($action === 'add') {
                 $db->prepare(
-                    'INSERT INTO products 
-                    (category_id, name, name_ar, name_fr, description, description_ar, description_fr, 
-                     price, old_price, image_url, sizes, stock_count, offer_ends_at, is_active) 
+                    'INSERT INTO products
+                    (category_id, name, name_ar, name_fr, description, description_ar, description_fr,
+                     price, old_price, image_url, sizes, stock_count, offer_ends_at, is_active)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                 )->execute([
-                    $catId, $name, $nameAr ?: null, $nameFr ?: null, 
-                    $desc, $descAr ?: null, $descFr ?: null,
-                    $price, $oldPrice, $imageUrl, $sizes, 
-                    $stockCount, $offerEndsAt ?: null, $isActive
+                    $catId, $name, $nameAr ?: null, $nameFr ?: null,
+                    $desc,  $descAr ?: null, $descFr ?: null,
+                    $price, $oldPrice, $imageUrl, $sizes,
+                    $stockCount, $offerEndsAt, $isActive,
                 ]);
                 flash('success', 'تمت إضافة المنتج بنجاح! ✅');
             } else {
                 $id = (int)$_POST['id'];
+                if (!$id) {
+                    flash('error', 'منتج غير صالح.');
+                    header('Location: /admin/products.php'); exit;
+                }
                 $db->prepare(
-                    'UPDATE products 
-                    SET category_id=?, name=?, name_ar=?, name_fr=?, 
+                    'UPDATE products
+                    SET category_id=?, name=?, name_ar=?, name_fr=?,
                         description=?, description_ar=?, description_fr=?,
-                        price=?, old_price=?, image_url=?, sizes=?, 
-                        stock_count=?, offer_ends_at=?, is_active=? 
+                        price=?, old_price=?, image_url=?, sizes=?,
+                        stock_count=?, offer_ends_at=?, is_active=?
                     WHERE id=?'
                 )->execute([
-                    $catId, $name, $nameAr ?: null, $nameFr ?: null, 
-                    $desc, $descAr ?: null, $descFr ?: null,
-                    $price, $oldPrice, $imageUrl, $sizes, 
-                    $stockCount, $offerEndsAt ?: null, $isActive, $id
+                    $catId, $name, $nameAr ?: null, $nameFr ?: null,
+                    $desc,  $descAr ?: null, $descFr ?: null,
+                    $price, $oldPrice, $imageUrl, $sizes,
+                    $stockCount, $offerEndsAt, $isActive, $id,
                 ]);
                 flash('success', 'تم تحديث المنتج! ✅');
             }
-            header('Location: https://vestia-backend-2.onrender.com/admin/products.php'); exit;
+            header('Location: /admin/products.php'); exit;
         }
     }
 
     if ($action === 'delete') {
         $id = (int)$_POST['id'];
-        $db->prepare('UPDATE products SET is_active=0 WHERE id=?')->execute([$id]);
-        flash('success', 'تم إخفاء المنتج.');
-        header('Location: https://vestia-backend-2.onrender.com/admin/products.php'); exit;
+        if ($id) {
+            $db->prepare('UPDATE products SET is_active=0 WHERE id=?')->execute([$id]);
+            flash('success', 'تم إخفاء المنتج.');
+        }
+        header('Location: /admin/products.php'); exit;
     }
 }
 
 // Edit mode
 $editProduct = null;
 if (isset($_GET['edit'])) {
-    $stmt = $db->prepare('SELECT * FROM products WHERE id=?');
-    $stmt->execute([(int)$_GET['edit']]);
-    $editProduct = $stmt->fetch();
+    $editId = (int)$_GET['edit'];
+    if ($editId) {
+        $stmt = $db->prepare('SELECT * FROM products WHERE id=?');
+        $stmt->execute([$editId]);
+        $editProduct = $stmt->fetch();
+    }
 }
 
 // Filters
-$search  = trim($_GET['search']   ?? '');
+$search  = mb_substr(trim($_GET['search'] ?? ''), 0, 100);
 $catFilt = (int)($_GET['category'] ?? 0);
 $page    = max(1, (int)($_GET['page'] ?? 1));
 $limit   = 15;
@@ -198,9 +209,11 @@ if ($search)  { $where[] = 'p.name ILIKE ?'; $params[] = "%$search%"; }
 if ($catFilt) { $where[] = 'p.category_id=?'; $params[] = $catFilt; }
 $whereSQL = implode(' AND ', $where);
 
-$total = $db->prepare("SELECT COUNT(*) FROM products p WHERE $whereSQL");
-$total->execute($params); $total = (int)$total->fetchColumn();
+$totalStmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE $whereSQL");
+$totalStmt->execute($params);
+$total = (int)$totalStmt->fetchColumn();
 $pages = max(1, (int)ceil($total / $limit));
+$page  = min($page, $pages);
 
 $stmt = $db->prepare(
     "SELECT p.*, c.name AS cat_name FROM products p
@@ -233,14 +246,14 @@ include __DIR__ . '/includes/header.php';
 .img-upload-preview .remove-btn { position: absolute; top: 8px; right: 8px; background: rgba(220,38,38,.8); color: #fff; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 15px; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; pointer-events: all; }
 .cloudinary-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: #0ea5e9; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 20px; padding: 2px 8px; margin-top: 4px; }
 .stock-indicator { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
-.stock-high { background: #dcfce7; color: #166534; }
-.stock-low { background: #fef08a; color: #b45309; }
+.stock-high  { background: #dcfce7; color: #166534; }
+.stock-low   { background: #fef08a; color: #b45309; }
 .stock-empty { background: #fee2e2; color: #991b1b; }
 </style>
 
 <?php $succ=flash('success'); $err=flash('error'); ?>
 <?php if($succ): ?><div class="alert alert-success alert-dismissible fade show" role="alert"><?= htmlspecialchars($succ) ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><?php endif; ?>
-<?php if($err):  ?><div class="alert alert-danger alert-dismissible fade show"  role="alert"><?= htmlspecialchars($err)  ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><?php endif; ?>
+<?php if($err):  ?><div class="alert alert-danger  alert-dismissible fade show" role="alert"><?= htmlspecialchars($err)  ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><?php endif; ?>
 
 <div class="row g-4">
 
@@ -250,7 +263,7 @@ include __DIR__ . '/includes/header.php';
       <div class="card-header">
         <h5><i class="bi bi-bag-plus me-2"></i><?= $editProduct ? 'تعديل منتج' : 'إضافة منتج جديد' ?></h5>
         <?php if ($editProduct): ?>
-          <a href="https://vestia-backend-2.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary ms-auto">إلغاء</a>
+          <a href="/admin/products.php" class="btn btn-sm btn-outline-secondary ms-auto">إلغاء</a>
         <?php endif; ?>
       </div>
       <div class="p-4">
@@ -258,33 +271,35 @@ include __DIR__ . '/includes/header.php';
           <input type="hidden" name="_csrf" value="<?= csrf() ?>">
           <input type="hidden" name="action" value="<?= $editProduct ? 'edit' : 'add' ?>">
           <input type="hidden" name="current_image_url" id="currentImageUrl" value="<?= htmlspecialchars($editProduct['image_url'] ?? '') ?>">
-          <?php if ($editProduct): ?><input type="hidden" name="id" value="<?= $editProduct['id'] ?>"><?php endif; ?>
+          <?php if ($editProduct): ?>
+            <input type="hidden" name="id" value="<?= (int)$editProduct['id'] ?>">
+          <?php endif; ?>
 
-          <!-- ✅ أسماء متعددة اللغات -->
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-tag me-1" style="color:#3b82f6"></i>اسم المنتج (إنجليزي) *</label>
-            <input type="text" name="name" class="form-control" placeholder="مثال: Summer Dress"
+            <input type="text" name="name" class="form-control" maxlength="200"
+                   placeholder="مثال: Summer Dress"
                    value="<?= htmlspecialchars($editProduct['name'] ?? '') ?>" required>
           </div>
 
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-tag me-1" style="color:#ec4899"></i>الاسم بالعربية</label>
-            <input type="text" name="name_ar" class="form-control" dir="rtl"
+            <input type="text" name="name_ar" class="form-control" dir="rtl" maxlength="200"
                    placeholder="مثال: فستان صيفي"
                    value="<?= htmlspecialchars($editProduct['name_ar'] ?? '') ?>">
           </div>
 
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-tag me-1" style="color:#8b5cf6"></i>الاسم بالفرنسية</label>
-            <input type="text" name="name_fr" class="form-control"
+            <input type="text" name="name_fr" class="form-control" maxlength="200"
                    placeholder="مثال: Robe d'été"
                    value="<?= htmlspecialchars($editProduct['name_fr'] ?? '') ?>">
           </div>
 
-          <!-- ✅ الأوصاف -->
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-file-text me-1" style="color:#6366f1"></i>الوصف (إنجليزي)</label>
-            <textarea name="description" class="form-control" rows="2" placeholder="وصف المنتج بالإنجليزية" required><?= htmlspecialchars($editProduct['description'] ?? '') ?></textarea>
+            <textarea name="description" class="form-control" rows="2"
+                      placeholder="وصف المنتج بالإنجليزية" required><?= htmlspecialchars($editProduct['description'] ?? '') ?></textarea>
           </div>
 
           <div class="mb-3">
@@ -299,34 +314,32 @@ include __DIR__ . '/includes/header.php';
                       placeholder="Description du produit en français"><?= htmlspecialchars($editProduct['description_fr'] ?? '') ?></textarea>
           </div>
 
-          <!-- ✅ الفئة -->
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-folder me-1" style="color:#f59e0b"></i>الفئة</label>
             <select name="category_id" class="form-select">
               <option value="">— بدون فئة —</option>
               <?php foreach ($categories as $cat): ?>
-                <option value="<?= $cat['id'] ?>" <?= ($editProduct['category_id'] ?? '') == $cat['id'] ? 'selected' : '' ?>>
+                <option value="<?= (int)$cat['id'] ?>"
+                  <?= ($editProduct['category_id'] ?? '') == $cat['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars($cat['name']) ?>
                 </option>
               <?php endforeach; ?>
             </select>
           </div>
 
-          <!-- ✅ الأسعار -->
           <div class="row g-2 mb-3">
             <div class="col">
               <label class="form-label"><i class="bi bi-cash-coin me-1" style="color:#10b981"></i>السعر *</label>
-              <input type="number" name="price" class="form-control" step="0.01"
-                     value="<?= $editProduct['price'] ?? '' ?>" required>
+              <input type="number" name="price" class="form-control" step="0.01" min="0.01" max="9999999"
+                     value="<?= htmlspecialchars($editProduct['price'] ?? '') ?>" required>
             </div>
             <div class="col">
               <label class="form-label"><i class="bi bi-percent me-1" style="color:#ef4444"></i>السعر القديم</label>
-              <input type="number" name="old_price" class="form-control" step="0.01"
-                     value="<?= $editProduct['old_price'] ?? '' ?>" placeholder="اختياري">
+              <input type="number" name="old_price" class="form-control" step="0.01" min="0" max="9999999"
+                     value="<?= htmlspecialchars($editProduct['old_price'] ?? '') ?>" placeholder="اختياري">
             </div>
           </div>
 
-          <!-- ✅ الصورة -->
           <div class="mb-3">
             <label class="form-label d-flex align-items-center gap-2">
               <i class="bi bi-image" style="color:#06b6d4"></i>صورة المنتج
@@ -351,50 +364,42 @@ include __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- ✅ المقاسات -->
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-rulers me-1" style="color:#a78bfa"></i>المقاسات</label>
-            <input type="text" name="sizes" class="form-control"
+            <input type="text" name="sizes" class="form-control" maxlength="100"
                    value="<?= htmlspecialchars($editProduct['sizes'] ?? 'S,M,L,XL,XXL') ?>"
                    placeholder="مفصول بفواصل: S,M,L,XL,XXL">
           </div>
 
-          <!-- ✅ المخزون (سهل الاستخدام) -->
           <div class="mb-3">
             <label class="form-label"><i class="bi bi-box-seam me-1" style="color:#14b8a6"></i>عدد القطع المتبقية</label>
             <div class="input-group input-group-lg">
               <button class="btn btn-outline-secondary" type="button" onclick="adjustStock(-5)">-5</button>
               <button class="btn btn-outline-secondary" type="button" onclick="adjustStock(-1)">-1</button>
-              <input type="number" name="stock_count" class="form-control text-center fw-bold" 
-                     id="stockCount" min="0" value="<?= $editProduct['stock_count'] ?? 0 ?>"
-                     style="font-size: 18px; letter-spacing: 2px">
+              <input type="number" name="stock_count" class="form-control text-center fw-bold"
+                     id="stockCount" min="0" max="99999"
+                     value="<?= (int)($editProduct['stock_count'] ?? 0) ?>"
+                     style="font-size:18px;letter-spacing:2px">
               <button class="btn btn-outline-secondary" type="button" onclick="adjustStock(1)">+1</button>
               <button class="btn btn-outline-secondary" type="button" onclick="adjustStock(5)">+5</button>
             </div>
-            <small class="text-muted d-block mt-2">
-              💡 استخدم الأزرار للتعديل السريع أو اكتب الرقم مباشرة
-            </small>
+            <small class="text-muted d-block mt-2">💡 استخدم الأزرار للتعديل السريع أو اكتب الرقم مباشرة</small>
           </div>
 
-          <!-- ✅ نهاية العرض (سهل جداً) -->
           <div class="mb-3">
             <label class="form-label d-flex align-items-center gap-2">
               <i class="bi bi-hourglass-split" style="color:#f59e0b"></i>تاريخ انتهاء العرض
               <span class="badge bg-warning">اختياري</span>
             </label>
             <div class="input-group">
-              <input type="datetime-local" name="offer_ends_at" 
-                     class="form-control" id="offerEndsAt"
-                     value="<?= formatDatetimeForInput($editProduct['offer_ends_at'] ?? null) ?>"
+              <input type="datetime-local" name="offer_ends_at" class="form-control" id="offerEndsAt"
+                     value="<?= htmlspecialchars(formatDatetimeForInput($editProduct['offer_ends_at'] ?? null)) ?>"
                      onchange="updateOfferStatus()">
-              <button class="btn btn-outline-secondary" type="button" id="quickSetOffer" 
-                      style="border-left: none; border-right: none" title="تعيين سريع">
-                ⚡
-              </button>
+              <button class="btn btn-outline-secondary" type="button" id="quickSetOffer"
+                      style="border-left:none;border-right:none" title="تعيين سريع">⚡</button>
             </div>
             <small class="text-muted d-block mt-2">
-              ⚡ <strong>الخيارات السريعة:</strong>
-              <br>
+              ⚡ <strong>الخيارات السريعة:</strong><br>
               <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 m-0" onclick="setOfferQuick(1)">+1 ساعة</button>
               <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 m-0" onclick="setOfferQuick(3)">+3 ساعات</button>
               <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 m-0" onclick="setOfferQuick(6)">+6 ساعات</button>
@@ -407,8 +412,7 @@ include __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- ✅ حالة المنتج -->
-          <div class="form-check mb-4 p-2 rounded" style="background: #f0f9ff; border-left: 4px solid #06b6d4">
+          <div class="form-check mb-4 p-2 rounded" style="background:#f0f9ff;border-left:4px solid #06b6d4">
             <input class="form-check-input" type="checkbox" name="is_active" id="isActive"
                    <?= ($editProduct['is_active'] ?? 1) ? 'checked' : '' ?>>
             <label class="form-check-label fw-500" for="isActive">
@@ -428,21 +432,21 @@ include __DIR__ . '/includes/header.php';
   <div class="col-xl-8 col-lg-7">
     <div class="card">
       <div class="card-header justify-content-between flex-wrap gap-2">
-        <h5><i class="bi bi-bag me-2"></i>المنتجات <span class="text-muted fw-normal" style="font-size:13px">(<?= $total ?>)</span></h5>
+        <h5><i class="bi bi-bag me-2"></i>المنتجات <span class="text-muted fw-normal" style="font-size:13px">(<?= (int)$total ?>)</span></h5>
         <form class="d-flex gap-2" method="GET">
-          <input type="text" name="search" class="form-control form-control-sm"
+          <input type="text" name="search" class="form-control form-control-sm" maxlength="100"
                  placeholder="بحث..." value="<?= htmlspecialchars($search) ?>" style="width:160px">
           <select name="category" class="form-select form-select-sm" style="width:130px">
             <option value="">جميع الفئات</option>
             <?php foreach ($categories as $cat): ?>
-              <option value="<?= $cat['id'] ?>" <?= $catFilt == $cat['id'] ? 'selected' : '' ?>>
+              <option value="<?= (int)$cat['id'] ?>" <?= $catFilt == $cat['id'] ? 'selected' : '' ?>>
                 <?= htmlspecialchars($cat['name']) ?>
               </option>
             <?php endforeach; ?>
           </select>
           <button class="btn btn-sm btn-dark">تصفية</button>
           <?php if ($search || $catFilt): ?>
-            <a href="https://vestia-backend-2.onrender.com/admin/products.php" class="btn btn-sm btn-outline-secondary">إعادة تعيين</a>
+            <a href="/admin/products.php" class="btn btn-sm btn-outline-secondary">إعادة تعيين</a>
           <?php endif; ?>
         </form>
       </div>
@@ -454,7 +458,7 @@ include __DIR__ . '/includes/header.php';
             </tr>
           </thead>
           <tbody>
-          <?php foreach ($products as $p): 
+          <?php foreach ($products as $p):
             $timeStatus = getTimeRemaining($p['offer_ends_at']);
           ?>
             <tr>
@@ -473,12 +477,12 @@ include __DIR__ . '/includes/header.php';
                   <?php endif; ?>
                   <div>
                     <div class="fw-600" style="font-size:13px"><?= htmlspecialchars($p['name']) ?></div>
-                    <div style="font-size:11px;color:#9ca3af">#<?= $p['id'] ?></div>
+                    <div style="font-size:11px;color:#9ca3af">#<?= (int)$p['id'] ?></div>
                   </div>
                 </div>
               </td>
               <td style="font-size:12px">
-                <?php if ($p['name_ar'] ?? null): ?>
+                <?php if (!empty($p['name_ar'])): ?>
                   <div dir="rtl"><?= htmlspecialchars($p['name_ar']) ?></div>
                 <?php else: ?>
                   <span style="color:#d1d5db">—</span>
@@ -486,27 +490,27 @@ include __DIR__ . '/includes/header.php';
               </td>
               <td style="font-size:13px"><?= htmlspecialchars($p['cat_name'] ?? '—') ?></td>
               <td>
-                <div class="fw-700"><?= formatPrice($p['price']) ?></div>
+                <div class="fw-700"><?= formatPrice((float)$p['price']) ?></div>
                 <?php if ($p['old_price']): ?>
-                  <div style="font-size:11px;color:#9ca3af;text-decoration:line-through"><?= formatPrice($p['old_price']) ?></div>
+                  <div style="font-size:11px;color:#9ca3af;text-decoration:line-through"><?= formatPrice((float)$p['old_price']) ?></div>
                 <?php endif; ?>
               </td>
               <td>
-                <span class="stock-indicator <?php 
-                  if ($p['stock_count'] > 10) echo 'stock-high';
-                  elseif ($p['stock_count'] > 0) echo 'stock-low';
-                  else echo 'stock-empty';
+                <span class="stock-indicator <?php
+                  if ((int)$p['stock_count'] > 10)     echo 'stock-high';
+                  elseif ((int)$p['stock_count'] > 0)  echo 'stock-low';
+                  else                                  echo 'stock-empty';
                 ?>">
-                  <?php if ($p['stock_count'] > 0): ?>
-                    ✓ <?= $p['stock_count'] ?>
+                  <?php if ((int)$p['stock_count'] > 0): ?>
+                    ✓ <?= (int)$p['stock_count'] ?>
                   <?php else: ?>
                     ✗ منتهي
                   <?php endif; ?>
                 </span>
               </td>
               <td style="font-size:12px">
-                <span class="<?= $timeStatus['class'] ?>">
-                  <?= $timeStatus['display'] ?>
+                <span class="<?= htmlspecialchars($timeStatus['class']) ?>">
+                  <?= htmlspecialchars($timeStatus['display']) ?>
                 </span>
               </td>
               <td>
@@ -518,13 +522,17 @@ include __DIR__ . '/includes/header.php';
               </td>
               <td>
                 <div class="d-flex gap-1">
-                  <a href="https://vestia-backend-2.onrender.com/admin/products.php?edit=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary" title="تعديل"><i class="bi bi-pencil"></i></a>
+                  <a href="/admin/products.php?edit=<?= (int)$p['id'] ?>" class="btn btn-sm btn-outline-primary" title="تعديل">
+                    <i class="bi bi-pencil"></i>
+                  </a>
                   <form method="POST" class="d-inline">
                     <input type="hidden" name="_csrf" value="<?= csrf() ?>">
                     <input type="hidden" name="action" value="delete">
-                    <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                    <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
                     <button type="submit" class="btn btn-sm btn-outline-danger" title="حذف"
-                            onclick="return confirm('هل تريد حذف هذا المنتج؟')"><i class="bi bi-trash"></i></button>
+                            data-confirm="هل تريد حذف هذا المنتج؟">
+                      <i class="bi bi-trash"></i>
+                    </button>
                   </form>
                 </div>
               </td>
@@ -541,7 +549,9 @@ include __DIR__ . '/includes/header.php';
         <nav><ul class="pagination mb-0">
           <?php for ($i = 1; $i <= $pages; $i++): ?>
             <li class="page-item <?= $i == $page ? 'active' : '' ?>">
-              <a class="page-link" href="?page=<?= $i ?>&search=<?= urlencode($search) ?>&category=<?= $catFilt ?>"><?= $i ?></a>
+              <a class="page-link" href="?page=<?= (int)$i ?>&search=<?= urlencode($search) ?>&category=<?= (int)$catFilt ?>">
+                <?= (int)$i ?>
+              </a>
             </li>
           <?php endfor; ?>
         </ul></nav>
@@ -552,7 +562,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// ✅ إدارة الصور
 document.addEventListener('DOMContentLoaded', function () {
   const existing = document.getElementById('currentImageUrl').value;
   if (existing) showPreview(existing);
@@ -567,19 +576,19 @@ function handleImageSelect(input) {
 
 function showPreview(src) {
   document.getElementById('previewImg').src = src;
-  document.getElementById('uploadPlaceholder').style.display = 'none';
-  document.getElementById('uploadingIndicator').style.display = 'none';
-  document.getElementById('uploadPreview').style.display = 'block';
+  document.getElementById('uploadPlaceholder').style.display   = 'none';
+  document.getElementById('uploadingIndicator').style.display  = 'none';
+  document.getElementById('uploadPreview').style.display       = 'block';
 }
 
 function removeImage(e) {
   e.stopPropagation();
-  document.getElementById('imageFileInput').value = '';
-  document.getElementById('currentImageUrl').value = '';
-  document.getElementById('previewImg').src = '';
-  document.getElementById('uploadPreview').style.display = 'none';
+  document.getElementById('imageFileInput').value    = '';
+  document.getElementById('currentImageUrl').value  = '';
+  document.getElementById('previewImg').src          = '';
+  document.getElementById('uploadPreview').style.display      = 'none';
   document.getElementById('uploadingIndicator').style.display = 'none';
-  document.getElementById('uploadPlaceholder').style.display = 'flex';
+  document.getElementById('uploadPlaceholder').style.display  = 'flex';
 }
 
 function triggerPicker(e) {
@@ -587,49 +596,39 @@ function triggerPicker(e) {
   document.getElementById('imageFileInput').click();
 }
 
-// ✅ إدارة المخزون (بسيط جداً)
 function adjustStock(amount) {
-  const input = document.getElementById('stockCount');
-  const newValue = Math.max(0, parseInt(input.value) + amount);
-  input.value = newValue;
+  const input    = document.getElementById('stockCount');
+  const newValue = Math.max(0, parseInt(input.value || 0) + amount);
+  input.value    = newValue;
   input.focus();
 }
 
-// ✅ إدارة العرض (سهل جداً)
 function setOfferQuick(hours) {
   const now = new Date();
   now.setHours(now.getHours() + hours);
-  const iso = now.toISOString().slice(0, 16);
-  document.getElementById('offerEndsAt').value = iso;
+  document.getElementById('offerEndsAt').value = now.toISOString().slice(0, 16);
   updateOfferStatus();
 }
 
 function clearOffer() {
-  document.getElementById('offerEndsAt').value = '';
+  document.getElementById('offerEndsAt').value        = '';
   document.getElementById('offerStatus').style.display = 'none';
 }
 
 function updateOfferStatus() {
-  const input = document.getElementById('offerEndsAt');
-  const statusDiv = document.getElementById('offerStatus');
+  const input      = document.getElementById('offerEndsAt');
+  const statusDiv  = document.getElementById('offerStatus');
   const statusText = document.getElementById('offerStatusText');
-  
-  if (!input.value) {
-    statusDiv.style.display = 'none';
-    return;
-  }
-  
+  if (!input.value) { statusDiv.style.display = 'none'; return; }
   const endTime = new Date(input.value);
-  const now = new Date();
-  
+  const now     = new Date();
   if (now >= endTime) {
     statusText.textContent = '❌ التاريخ قد مضى!';
     statusText.style.color = '#dc2626';
   } else {
-    const diff = endTime - now;
+    const diff  = endTime - now;
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    const days = Math.floor(hours / 24);
-    
+    const days  = Math.floor(hours / 24);
     if (days > 0) {
       statusText.textContent = `✅ العرض سينتهي بعد ${days} يوم و${hours % 24} ساعات`;
       statusText.style.color = '#059669';
@@ -638,19 +637,17 @@ function updateOfferStatus() {
       statusText.style.color = '#f59e0b';
     }
   }
-  
   statusDiv.style.display = 'block';
 }
 
-// ✅ Submit handler
 document.getElementById('productForm').addEventListener('submit', function () {
   const hasNewFile = document.getElementById('imageFileInput').files.length > 0;
   if (hasNewFile) {
-    document.getElementById('uploadPreview').style.display = 'none';
-    document.getElementById('uploadPlaceholder').style.display = 'none';
+    document.getElementById('uploadPreview').style.display      = 'none';
+    document.getElementById('uploadPlaceholder').style.display  = 'none';
     document.getElementById('uploadingIndicator').style.display = 'flex';
-    document.getElementById('submitBtn').disabled = true;
-    document.getElementById('submitBtn').innerHTML = 
+    document.getElementById('submitBtn').disabled               = true;
+    document.getElementById('submitBtn').innerHTML =
       '<span class="spinner-border spinner-border-sm me-2"></span>جارٍ الحفظ...';
   }
 });
