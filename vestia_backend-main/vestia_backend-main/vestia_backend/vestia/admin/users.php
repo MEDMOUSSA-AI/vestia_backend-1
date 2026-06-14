@@ -9,30 +9,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrf();
     $id     = (int)$_POST['id'];
     $action = $_POST['action'] ?? '';
-    if ($action === 'toggle') {
+    if ($id && $action === 'toggle') {
         $cur = $db->prepare('SELECT is_active FROM users WHERE id=?');
         $cur->execute([$id]);
-        $cur = $cur->fetchColumn();
-        $db->prepare('UPDATE users SET is_active=? WHERE id=?')->execute([$cur?0:1, $id]);
-        flash('success', 'Customer status updated.');
+        $curVal = $cur->fetchColumn();
+        if ($curVal !== false) {
+            $db->prepare('UPDATE users SET is_active=? WHERE id=?')->execute([$curVal ? 0 : 1, $id]);
+            flash('success', 'Customer status updated.');
+        }
     }
     header('Location: /admin/users.php'); exit;
 }
 
-$search = trim($_GET['search'] ?? '');
-$page   = max(1,(int)($_GET['page']??1));
+$search = mb_substr(trim($_GET['search'] ?? ''), 0, 100);
+$page   = max(1, (int)($_GET['page'] ?? 1));
 $limit  = 20;
-$offset = ($page-1)*$limit;
+$offset = ($page - 1) * $limit;
 
 $where  = ['1=1'];
 $params = [];
-// ✅ ILIKE بدلاً من LIKE
-if ($search) { $where[] = '(name ILIKE ? OR phone ILIKE ?)'; $params[]= "%$search%"; $params[] = "%$search%"; }
+if ($search) {
+    $where[]  = '(name ILIKE ? OR phone ILIKE ?)';
+    $params[] = "%$search%";
+    $params[] = "%$search%";
+}
 $whereSQL = implode(' AND ', $where);
 
-$total = $db->prepare("SELECT COUNT(*) FROM users WHERE $whereSQL");
-$total->execute($params); $total = (int)$total->fetchColumn();
-$pages = max(1,(int)ceil($total/$limit));
+$totalStmt = $db->prepare("SELECT COUNT(*) FROM users WHERE $whereSQL");
+$totalStmt->execute($params);
+$total = (int)$totalStmt->fetchColumn();
+$pages = max(1, (int)ceil($total / $limit));
+$page  = min($page, $pages);
 
 $stmt = $db->prepare(
     "SELECT u.*,
@@ -47,15 +54,20 @@ $pageTitle = 'Customers';
 include __DIR__ . '/includes/header.php';
 ?>
 
-<?php $succ=flash('success'); if($succ): ?><div class="alert alert-success" data-auto-dismiss><?= htmlspecialchars($succ) ?></div><?php endif; ?>
+<?php $succ=flash('success'); if($succ): ?>
+<div class="alert alert-success" data-auto-dismiss><?= htmlspecialchars($succ) ?></div>
+<?php endif; ?>
 
 <div class="card">
   <div class="card-header justify-content-between flex-wrap gap-2">
-    <h5><i class="bi bi-people me-2"></i>Customers <span class="text-muted fw-normal" style="font-size:13px">(<?= $total ?>)</span></h5>
+    <h5><i class="bi bi-people me-2"></i>Customers <span class="text-muted fw-normal" style="font-size:13px">(<?= (int)$total ?>)</span></h5>
     <form class="d-flex gap-2" method="GET">
-      <input type="text" name="search" class="form-control form-control-sm" placeholder="Name or phone..." value="<?= htmlspecialchars($search) ?>" style="width:240px">
+      <input type="text" name="search" class="form-control form-control-sm" maxlength="100"
+             placeholder="Name or phone..." value="<?= htmlspecialchars($search) ?>" style="width:240px">
       <button class="btn btn-sm btn-dark">Search</button>
-      <?php if($search): ?><a href="/admin/users.php" class="btn btn-sm btn-outline-secondary">Clear</a><?php endif; ?>
+      <?php if($search): ?>
+        <a href="/admin/users.php" class="btn btn-sm btn-outline-secondary">Clear</a>
+      <?php endif; ?>
     </form>
   </div>
   <div class="table-responsive">
@@ -67,7 +79,7 @@ include __DIR__ . '/includes/header.php';
           <td>
             <div class="d-flex align-items-center gap-2">
               <div style="width:36px;height:36px;background:#f3f4f6;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#555;flex-shrink:0">
-                <?= strtoupper(substr($u['name'],0,1)) ?>
+                <?= htmlspecialchars(strtoupper(substr($u['name'], 0, 1))) ?>
               </div>
               <div>
                 <div class="fw-600" style="font-size:13px"><?= htmlspecialchars($u['name']) ?></div>
@@ -75,11 +87,13 @@ include __DIR__ . '/includes/header.php';
               </div>
             </div>
           </td>
-          <td style="font-size:13px"><?= $u['order_count'] ?> order<?= $u['order_count']!=1?'s':'' ?></td>
-          <td class="fw-600" style="font-size:13px"><?= formatPrice($u['total_spent']) ?></td>
-          <td style="font-size:12px;color:#9ca3af"><?= date('M j, Y', strtotime($u['created_at'])) ?></td>
+          <td style="font-size:13px"><?= (int)$u['order_count'] ?> order<?= (int)$u['order_count']!=1?'s':'' ?></td>
+          <td class="fw-600" style="font-size:13px"><?= formatPrice((float)$u['total_spent']) ?></td>
+          <td style="font-size:12px;color:#9ca3af"><?= htmlspecialchars(date('M j, Y', strtotime($u['created_at']))) ?></td>
           <td>
-            <span style="font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;background:<?= $u['is_active']?'#dcfce7':'#fee2e2' ?>;color:<?= $u['is_active']?'#166534':'#991b1b' ?>">
+            <span style="font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;
+                         background:<?= $u['is_active']?'#dcfce7':'#fee2e2' ?>;
+                         color:<?= $u['is_active']?'#166534':'#991b1b' ?>">
               <?= $u['is_active'] ? 'Active' : 'Suspended' ?>
             </span>
           </td>
@@ -87,10 +101,11 @@ include __DIR__ . '/includes/header.php';
             <form method="POST" class="d-inline">
               <input type="hidden" name="_csrf" value="<?= csrf() ?>">
               <input type="hidden" name="action" value="toggle">
-              <input type="hidden" name="id" value="<?= $u['id'] ?>">
-              <button type="submit" class="btn btn-sm <?= $u['is_active']?'btn-outline-danger':'btn-outline-success' ?>"
+              <input type="hidden" name="id" value="<?= (int)$u['id'] ?>">
+              <button type="submit"
+                      class="btn btn-sm <?= $u['is_active']?'btn-outline-danger':'btn-outline-success' ?>"
                       data-confirm="<?= $u['is_active']?'Suspend this customer?':'Re-activate this customer?' ?>">
-                <?= $u['is_active']?'Suspend':'Activate' ?>
+                <?= $u['is_active'] ? 'Suspend' : 'Activate' ?>
               </button>
             </form>
           </td>
@@ -107,7 +122,7 @@ include __DIR__ . '/includes/header.php';
     <nav><ul class="pagination mb-0">
       <?php for($i=1;$i<=$pages;$i++): ?>
         <li class="page-item <?= $i==$page?'active':'' ?>">
-          <a class="page-link" href="?page=<?= $i ?>&search=<?= urlencode($search) ?>"><?= $i ?></a>
+          <a class="page-link" href="?page=<?= (int)$i ?>&search=<?= urlencode($search) ?>"><?= (int)$i ?></a>
         </li>
       <?php endfor; ?>
     </ul></nav>
