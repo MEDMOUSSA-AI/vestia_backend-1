@@ -11,7 +11,6 @@ class ProductController {
         try { $user = getAuthUser(); } catch (\Throwable $e) {}
         $userId = $user ? (int)$user['id'] : null;
 
-        // ✅ التحقق من قيم المدخلات
         $categoryId = isset($_GET['category_id']) ? (int)$_GET['category_id'] : null;
         $search     = isset($_GET['search']) ? mb_substr(trim($_GET['search']), 0, 100) : null;
         $lang       = $_GET['lang'] ?? 'en';
@@ -20,27 +19,29 @@ class ProductController {
         $limit      = min(50, max(1, (int)($_GET['limit'] ?? 20)));
         $offset     = ($page - 1) * $limit;
 
-        $where  = ['p.is_active = 1'];
-        $params = [];
+        $where       = ['p.is_active = 1'];
+        $whereParams = []; // ✅ params خاصة بالـ WHERE فقط
 
         if ($categoryId) {
-            $where[]  = 'p.category_id = ?';
-            $params[] = $categoryId;
+            $where[]       = 'p.category_id = ?';
+            $whereParams[] = $categoryId;
         }
 
         if ($search) {
-            $where[]  = 'p.name ILIKE ?';
-            $params[] = '%' . $search . '%';
+            $where[]       = 'p.name ILIKE ?';
+            $whereParams[] = '%' . $search . '%';
         }
 
         $whereSQL = implode(' AND ', $where);
 
-        // ✅ إصلاح ثغرة SQL Injection — استخدام parameter بدلاً من إدراج $userId مباشرة
         $savedJoin = $userId
             ? 'LEFT JOIN saved_items sp ON sp.product_id = p.id AND sp.user_id = ?'
             : 'LEFT JOIN saved_items sp ON FALSE';
 
-        if ($userId) $params[] = $userId;
+        // ✅ الترتيب الصحيح: userId أولاً لأن JOIN يأتي قبل WHERE في SQL
+        $params = $userId
+            ? array_merge([$userId], $whereParams)
+            : $whereParams;
 
         $sql = "SELECT p.id, p.name, p.name_ar, p.name_fr, 
                        p.description, p.description_ar, p.description_fr,
@@ -70,10 +71,9 @@ class ProductController {
         $stmt->execute($params);
         $products = $stmt->fetchAll();
 
-        $countSql  = "SELECT COUNT(*) FROM products p WHERE {$whereSQL}";
-        $countParams = array_slice($params, 0, $userId ? count($params) - 1 : count($params));
-        $countStmt = $db->prepare($countSql);
-        $countStmt->execute($countParams);
+        // ✅ استخدام whereParams فقط بدون userId
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE {$whereSQL}");
+        $countStmt->execute($whereParams);
         $total = (int)$countStmt->fetchColumn();
 
         jsonSuccess([
@@ -86,7 +86,6 @@ class ProductController {
     }
 
     public static function show(string $id): void {
-        // ✅ التحقق من أن الـ ID رقم صحيح
         if (!ctype_digit($id)) jsonError('Invalid product ID', 422);
 
         $db   = getDB();
@@ -97,12 +96,12 @@ class ProductController {
         try { $user = getAuthUser(); } catch (\Throwable $e) {}
         $userId = $user ? (int)$user['id'] : null;
 
-        // ✅ إصلاح ثغرة SQL Injection — استخدام parameter بدلاً من إدراج $userId مباشرة
         $savedJoin = $userId
             ? 'LEFT JOIN saved_items sp ON sp.product_id = p.id AND sp.user_id = ?'
             : 'LEFT JOIN saved_items sp ON FALSE';
 
-        $params = $userId ? [$id, $userId] : [$id];
+        // ✅ الترتيب الصحيح: userId قبل id المنتج لأن JOIN قبل WHERE
+        $params = $userId ? [$userId, $id] : [$id];
 
         $sql = "SELECT p.id, p.name, p.name_ar, p.name_fr, 
                        p.description, p.description_ar, p.description_fr,
@@ -194,7 +193,7 @@ class ProductController {
     }
 
     public static function search(): void {
-        $db = getDB();
+        $db   = getDB();
         $q    = mb_substr(trim($_GET['q'] ?? ''), 0, 100);
         $lang = $_GET['lang'] ?? 'en';
         if (!in_array($lang, ['en', 'ar', 'fr'])) $lang = 'en';
