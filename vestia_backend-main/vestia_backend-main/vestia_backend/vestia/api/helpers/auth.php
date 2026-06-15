@@ -6,18 +6,18 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../helpers/response.php';
 
 function getAuthUser(): array {
-    $headers = getallheaders();
+    $headers    = getallheaders();
     $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 
     if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
-        jsonError('Unauthorized — Missing token', 401);
+        throw new \Exception('Unauthorized — Missing token', 401);
     }
 
     $token = trim(substr($authHeader, 7));
 
     // ✅ التحقق من صيغة الـ token (يجب أن يكون 64 حرفاً hex فقط)
     if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
-        jsonError('Unauthorized — Invalid token format', 401);
+        throw new \Exception('Unauthorized — Invalid token format', 401);
     }
 
     $db   = getDB();
@@ -31,11 +31,11 @@ function getAuthUser(): array {
     $user = $stmt->fetch();
 
     if (!$user) {
-        jsonError('Unauthorized — Invalid or expired token', 401);
+        throw new \Exception('Unauthorized — Invalid or expired token', 401);
     }
 
     if (!$user['is_active']) {
-        jsonError('Account is suspended', 403);
+        throw new \Exception('Account is suspended', 403);
     }
 
     return $user;
