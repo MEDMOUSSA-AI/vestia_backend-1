@@ -1,19 +1,27 @@
 <?php
 // ============================================================
 // VESTIA — FashionAiController.php
-// الخدمة 1: تجربة الثوب الافتراضية
-// الخدمة 2: اقتراح الإطلالة الكاملة
+// الخدمة 1: تجربة الثوب الافتراضية (tryon)
+// الخدمة 2: اقتراح الإطلالة الكاملة (outfit)
+// الخدمة 3: جلب اقتراحات الإطلالة (suggest)
 // ============================================================
 
 class FashionAiController {
 
+    // ✅ حد أقصى 15 MB لاستيعاب صور Base64 (أكبر بـ 33% من الملف الأصلي)
+    private const MAX_IMAGE_BODY = 15 * 1024 * 1024;
+
+    // ──────────────────────────────────────────────────────
     public static function suggest(): void {
         global $pdo;
-        requireAuth();
+        getAuthUser(); // ✅ التحقق من التوكن
+
         $productId = (int)($_GET['product_id'] ?? 0);
         if (!$productId) jsonError('product_id مطلوب');
 
-        $stmt = $pdo->prepare("SELECT category_id FROM products WHERE id = ? AND is_active = 1");
+        $stmt = $pdo->prepare("
+            SELECT category_id FROM products WHERE id = ? AND is_active = 1
+        ");
         $stmt->execute([$productId]);
         $product = $stmt->fetch();
         if (!$product) jsonError('المنتج غير موجود', 404);
@@ -54,8 +62,10 @@ class FashionAiController {
     // ──────────────────────────────────────────────────────
     public static function tryon(): void {
         global $pdo;
-        requireAuth();
-        $body      = getRequestBody();
+        getAuthUser(); // ✅ التحقق من التوكن
+
+        // ✅ 15 MB لاستيعاب صورة Base64
+        $body      = getRequestBody(self::MAX_IMAGE_BODY);
         $productId = (int)($body['product_id'] ?? 0);
         $userImage = $body['user_image_base64'] ?? '';
 
@@ -63,7 +73,14 @@ class FashionAiController {
             jsonError('product_id و user_image_base64 مطلوبان');
         }
 
-        $stmt = $pdo->prepare("SELECT image_url FROM products WHERE id = ? AND is_active = 1");
+        // ✅ التحقق من صيغة Base64
+        if (!self::isValidBase64Image($userImage)) {
+            jsonError('صيغة الصورة غير صالحة');
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT image_url FROM products WHERE id = ? AND is_active = 1
+        ");
         $stmt->execute([$productId]);
         $product = $stmt->fetch();
         if (!$product) jsonError('المنتج غير موجود', 404);
@@ -77,14 +94,21 @@ class FashionAiController {
     // ──────────────────────────────────────────────────────
     public static function outfit(): void {
         global $pdo;
-        requireAuth();
-        $body        = getRequestBody();
+        getAuthUser(); // ✅ التحقق من التوكن
+
+        // ✅ 15 MB لاستيعاب صورة Base64
+        $body        = getRequestBody(self::MAX_IMAGE_BODY);
         $productId   = (int)($body['product_id'] ?? 0);
         $suggestedId = (int)($body['suggested_product_id'] ?? 0);
         $userImage   = $body['user_image_base64'] ?? '';
 
         if (!$productId || !$suggestedId || empty($userImage)) {
             jsonError('product_id و suggested_product_id و user_image_base64 مطلوبان');
+        }
+
+        // ✅ التحقق من صيغة Base64
+        if (!self::isValidBase64Image($userImage)) {
+            jsonError('صيغة الصورة غير صالحة');
         }
 
         $stmt = $pdo->prepare("
@@ -96,7 +120,7 @@ class FashionAiController {
         $products = $stmt->fetchAll();
         if (count($products) < 2) jsonError('أحد المنتجين غير موجود', 404);
 
-        // الجزء العلوي أولاً: Tshirts(2), Jackets(5)
+        // ✅ الجزء العلوي أولاً: Tshirts(2), Jackets(5)
         $upperCategories = [2, 5];
         usort($products, fn($a, $b) =>
             (in_array($a['category_id'], $upperCategories) ? 0 : 1) -
@@ -123,6 +147,7 @@ class FashionAiController {
     // ══════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════
+
     private static function callPixelAPI(string $userImageBase64, string $garmentUrl): ?string {
         $apiKey = getenv('PIXEL_API_KEY');
         if (!$apiKey) return null;
@@ -156,8 +181,17 @@ class FashionAiController {
     }
 
     private static function urlToBase64(string $url): string {
-        $imageData = file_get_contents($url);
+        $imageData = @file_get_contents($url);
         if (!$imageData) return '';
         return 'data:image/jpeg;base64,' . base64_encode($imageData);
+    }
+
+    // ✅ التحقق من أن الصورة base64 صالحة وبالنوع المسموح
+    private static function isValidBase64Image(string $input): bool {
+        if (!preg_match('/^data:image\/(jpeg|jpg|png|webp);base64,/', $input)) {
+            return false;
+        }
+        $base64Part = substr($input, strpos($input, ',') + 1);
+        return base64_decode($base64Part, true) !== false;
     }
 }
