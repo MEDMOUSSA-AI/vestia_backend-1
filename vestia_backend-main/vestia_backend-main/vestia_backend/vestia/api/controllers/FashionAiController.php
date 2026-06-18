@@ -1,9 +1,9 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v3 — FASHN.ai)
+// VESTIA — FashionAiController.php (v4 — FASHN.ai)
 // ✅ FASHN.ai API (async job-based)
 // ✅ نظام التجارب: 2 مجاناً + 3 بعد كل شراء
-// ✅ Cloudinary لرفع صورة المستخدم
+// ✅ Cloudinary لرفع صورة المستخدم (JSON upload)
 // ✅ لا تدعم Shoes — تُرجع رسالة واضحة
 // ============================================================
 
@@ -15,7 +15,7 @@ class FashionAiController {
     private const FASHN_STATUS_URL = self::FASHN_BASE_URL . '/status/';
 
     // ─── Cloudinary ──────────────────────────────────────────
-    private const CLOUDINARY_URL = 'https://api.cloudinary.com/v1_1/%s/image/upload';
+    private const CLOUDINARY_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/%s/image/upload';
 
     // ─── حدود الحجم ──────────────────────────────────────────
     private const MAX_IMAGE_BODY = 15 * 1024 * 1024; // 15 MB
@@ -132,7 +132,6 @@ class FashionAiController {
             jsonError('فشل في معالجة الصورة، حاول مجدداً', 500);
         }
 
-        // ✅ حفظ الـ URL في السجل
         self::updateTryonLog($pdo, $user['id'], $productId, $resultUrl);
 
         jsonSuccess(['result_image_url' => $resultUrl]);
@@ -172,7 +171,6 @@ class FashionAiController {
             }
         }
 
-        // ✅ تجربة واحدة للإطلالة الكاملة
         self::checkAndDeductCredit($pdo, $user['id'], $productId);
 
         // ✅ tops أولاً
@@ -316,6 +314,7 @@ class FashionAiController {
             'mode'          => 'balanced',
         ]);
 
+        // ─── إرسال الطلب ────────────────────────────────────
         $ch = curl_init(self::FASHN_RUN_URL);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -337,6 +336,7 @@ class FashionAiController {
         $predId = $data['id'] ?? null;
         if (!$predId) return null;
 
+        // ─── Polling ─────────────────────────────────────────
         for ($i = 0; $i < self::POLL_MAX; $i++) {
             sleep(self::POLL_INTERVAL);
 
@@ -362,6 +362,7 @@ class FashionAiController {
         return null;
     }
 
+    // ✅ التعديل الرئيسي: رفع base64 عبر JSON بدلاً من multipart
     private static function uploadToCloudinary(string $base64Image): ?string {
         $cloudName = getenv('CLOUDINARY_CLOUD_NAME');
         $apiKey    = getenv('CLOUDINARY_API_KEY');
@@ -370,20 +371,24 @@ class FashionAiController {
         if (!$cloudName || !$apiKey || !$apiSecret) return null;
 
         $timestamp = time();
-        $signature = sha1("folder=vestia_tryon&timestamp={$timestamp}{$apiSecret}");
+        $paramsToSign = "folder=vestia_tryon&timestamp={$timestamp}";
+        $signature = sha1($paramsToSign . $apiSecret);
 
-        $ch = curl_init(sprintf(self::CLOUDINARY_URL, $cloudName));
+        $payload = json_encode([
+            'file'      => $base64Image,   // data:image/jpeg;base64,....
+            'api_key'   => $apiKey,
+            'timestamp' => $timestamp,
+            'signature' => $signature,
+            'folder'    => 'vestia_tryon',
+        ]);
+
+        $ch = curl_init(sprintf(self::CLOUDINARY_UPLOAD_URL, $cloudName));
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_TIMEOUT        => 30,
-            CURLOPT_POSTFIELDS     => [
-                'file'      => $base64Image,
-                'api_key'   => $apiKey,
-                'timestamp' => $timestamp,
-                'signature' => $signature,
-                'folder'    => 'vestia_tryon',
-            ],
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_TIMEOUT        => 60,   // رفع الصور قد يستغرق أطول
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         ]);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
