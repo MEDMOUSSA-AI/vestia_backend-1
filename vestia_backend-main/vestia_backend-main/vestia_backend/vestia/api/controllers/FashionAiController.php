@@ -1,38 +1,27 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v4 — FASHN.ai)
-// ✅ FASHN.ai API (async job-based)
-// ✅ نظام التجارب: 2 مجاناً + 3 بعد كل شراء
-// ✅ Cloudinary لرفع صورة المستخدم (JSON upload)
-// ✅ لا تدعم Shoes — تُرجع رسالة واضحة
+// VESTIA — FashionAiController.php (v5 — getDB() fix)
 // ============================================================
 
 class FashionAiController {
 
-    // ─── FASHN.ai endpoints ──────────────────────────────────
     private const FASHN_BASE_URL   = 'https://api.fashn.ai/v1';
     private const FASHN_RUN_URL    = self::FASHN_BASE_URL . '/run';
     private const FASHN_STATUS_URL = self::FASHN_BASE_URL . '/status/';
 
-    // ─── Cloudinary ──────────────────────────────────────────
     private const CLOUDINARY_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/%s/image/upload';
 
-    // ─── حدود الحجم ──────────────────────────────────────────
-    private const MAX_IMAGE_BODY = 15 * 1024 * 1024; // 15 MB
+    private const MAX_IMAGE_BODY = 15 * 1024 * 1024;
+    private const POLL_INTERVAL  = 4;
+    private const POLL_MAX       = 20;
 
-    // ─── Polling ─────────────────────────────────────────────
-    private const POLL_INTERVAL = 4;  // ثوانٍ
-    private const POLL_MAX      = 20; // أقصاه 80 ثانية
-
-    // ─── فئات الملابس ────────────────────────────────────────
     private const CATEGORY_MAP = [
-        2 => 'tops',     // Tshirts
-        3 => 'bottoms',  // Jeans
-        5 => 'tops',     // Jackets
+        2 => 'tops',
+        3 => 'bottoms',
+        5 => 'tops',
     ];
-    private const UNSUPPORTED_CATEGORIES = [1, 4]; // All, Shoes
+    private const UNSUPPORTED_CATEGORIES = [1, 4];
 
-    // ─── نظام التجارب ────────────────────────────────────────
     private const FREE_CREDITS         = 2;
     private const CREDITS_PER_PURCHASE = 3;
 
@@ -40,20 +29,20 @@ class FashionAiController {
     // SUGGEST
     // ══════════════════════════════════════════════════════════
     public static function suggest(): void {
-        global $pdo;
+        $db = getDB();
         getAuthUser();
 
         $productId = (int)($_GET['product_id'] ?? 0);
         if (!$productId) jsonError('product_id مطلوب');
 
-        $stmt = $pdo->prepare("
+        $stmt = $db->prepare("
             SELECT category_id FROM products WHERE id = ? AND is_active = 1
         ");
         $stmt->execute([$productId]);
         $product = $stmt->fetch();
         if (!$product) jsonError('المنتج غير موجود', 404);
 
-        $pairedCategories = self::getPairedCategories($pdo, $product['category_id']);
+        $pairedCategories = self::getPairedCategories($db, $product['category_id']);
         $pairedCategories = array_values(array_filter(
             $pairedCategories,
             fn($id) => !in_array($id, self::UNSUPPORTED_CATEGORIES)
@@ -64,7 +53,7 @@ class FashionAiController {
         }
 
         $placeholders = implode(',', array_fill(0, count($pairedCategories), '?'));
-        $stmt = $pdo->prepare("
+        $stmt = $db->prepare("
             SELECT id, name, name_ar, name_fr, price, image_url, category_id
             FROM products
             WHERE category_id IN ($placeholders)
@@ -85,10 +74,10 @@ class FashionAiController {
     }
 
     // ══════════════════════════════════════════════════════════
-    // TRYON — تجربة ثوب واحد
+    // TRYON
     // ══════════════════════════════════════════════════════════
     public static function tryon(): void {
-        global $pdo;
+        $db   = getDB();
         $user = getAuthUser();
 
         $body      = getRequestBody(self::MAX_IMAGE_BODY);
@@ -103,7 +92,7 @@ class FashionAiController {
             jsonError('صيغة الصورة غير صالحة');
         }
 
-        $stmt = $pdo->prepare("
+        $stmt = $db->prepare("
             SELECT image_url, category_id FROM products WHERE id = ? AND is_active = 1
         ");
         $stmt->execute([$productId]);
@@ -114,12 +103,11 @@ class FashionAiController {
             jsonError('التجربة الافتراضية غير متاحة لهذه الفئة حالياً', 422);
         }
 
-        // ✅ خصم كريديت قبل الإرسال
-        self::checkAndDeductCredit($pdo, $user['id'], $productId);
+        self::checkAndDeductCredit($db, $user['id'], $productId);
 
         $personUrl = self::uploadToCloudinary($userImage);
         if (!$personUrl) {
-            self::refundCredit($pdo, $user['id'], $productId);
+            self::refundCredit($db, $user['id'], $productId);
             jsonError('تعذّر رفع الصورة، حاول مجدداً', 500);
         }
 
@@ -128,20 +116,20 @@ class FashionAiController {
 
         $resultUrl = self::submitAndPoll($personUrl, $garmentUrl, $category);
         if (!$resultUrl) {
-            self::refundCredit($pdo, $user['id'], $productId);
+            self::refundCredit($db, $user['id'], $productId);
             jsonError('فشل في معالجة الصورة، حاول مجدداً', 500);
         }
 
-        self::updateTryonLog($pdo, $user['id'], $productId, $resultUrl);
+        self::updateTryonLog($db, $user['id'], $productId, $resultUrl);
 
         jsonSuccess(['result_image_url' => $resultUrl]);
     }
 
     // ══════════════════════════════════════════════════════════
-    // OUTFIT — إطلالة كاملة
+    // OUTFIT
     // ══════════════════════════════════════════════════════════
     public static function outfit(): void {
-        global $pdo;
+        $db   = getDB();
         $user = getAuthUser();
 
         $body        = getRequestBody(self::MAX_IMAGE_BODY);
@@ -157,7 +145,7 @@ class FashionAiController {
             jsonError('صيغة الصورة غير صالحة');
         }
 
-        $stmt = $pdo->prepare("
+        $stmt = $db->prepare("
             SELECT id, image_url, category_id FROM products
             WHERE id IN (?, ?) AND is_active = 1
         ");
@@ -171,9 +159,8 @@ class FashionAiController {
             }
         }
 
-        self::checkAndDeductCredit($pdo, $user['id'], $productId);
+        self::checkAndDeductCredit($db, $user['id'], $productId);
 
-        // ✅ tops أولاً
         usort($products, fn($a, $b) =>
             (self::CATEGORY_MAP[$a['category_id']] === 'tops' ? 0 : 1) -
             (self::CATEGORY_MAP[$b['category_id']] === 'tops' ? 0 : 1)
@@ -181,7 +168,7 @@ class FashionAiController {
 
         $personUrl = self::uploadToCloudinary($userImage);
         if (!$personUrl) {
-            self::refundCredit($pdo, $user['id'], $productId);
+            self::refundCredit($db, $user['id'], $productId);
             jsonError('تعذّر رفع الصورة، حاول مجدداً', 500);
         }
 
@@ -192,7 +179,7 @@ class FashionAiController {
             $cat1
         );
         if (!$intermediate) {
-            self::refundCredit($pdo, $user['id'], $productId);
+            self::refundCredit($db, $user['id'], $productId);
             jsonError('فشل في معالجة الثوب الأول', 500);
         }
 
@@ -203,11 +190,11 @@ class FashionAiController {
             $cat2
         );
         if (!$final) {
-            self::refundCredit($pdo, $user['id'], $productId);
+            self::refundCredit($db, $user['id'], $productId);
             jsonError('فشل في معالجة الثوب الثاني', 500);
         }
 
-        self::updateTryonLog($pdo, $user['id'], $productId, $final);
+        self::updateTryonLog($db, $user['id'], $productId, $final);
 
         jsonSuccess(['result_image_url' => $final]);
     }
@@ -216,10 +203,10 @@ class FashionAiController {
     // GET CREDITS
     // ══════════════════════════════════════════════════════════
     public static function getCredits(): void {
-        global $pdo;
+        $db   = getDB();
         $user = getAuthUser();
 
-        $stmt = $pdo->prepare("
+        $stmt = $db->prepare("
             SELECT tryon_credits, tryon_total_used FROM users WHERE id = ?
         ");
         $stmt->execute([$user['id']]);
@@ -232,11 +219,11 @@ class FashionAiController {
     }
 
     // ══════════════════════════════════════════════════════════
-    // ADD CREDITS AFTER PURCHASE — يُستدعى من OrderController
+    // ADD CREDITS AFTER PURCHASE
     // ══════════════════════════════════════════════════════════
     public static function addCreditsAfterPurchase(int $userId): void {
-        global $pdo;
-        $pdo->prepare("
+        $db = getDB();
+        $db->prepare("
             UPDATE users
             SET tryon_credits  = tryon_credits + ?,
                 tryon_reset_at = CURRENT_TIMESTAMP
@@ -248,8 +235,8 @@ class FashionAiController {
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════
 
-    private static function checkAndDeductCredit(PDO $pdo, int $userId, int $productId): void {
-        $stmt = $pdo->prepare("
+    private static function checkAndDeductCredit(PDO $db, int $userId, int $productId): void {
+        $stmt = $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits - 1,
                 tryon_total_used = tryon_total_used + 1
@@ -263,7 +250,7 @@ class FashionAiController {
             jsonError('انتهت تجاربك المجانية، اشترِ منتجاً للحصول على 3 تجارب جديدة', 403);
         }
 
-        $pdo->prepare("
+        $db->prepare("
             INSERT INTO tryon_logs (user_id, product_id, credits_before, credits_after)
             VALUES (?, ?, ?, ?)
         ")->execute([
@@ -274,25 +261,23 @@ class FashionAiController {
         ]);
     }
 
-    private static function refundCredit(PDO $pdo, int $userId, int $productId): void {
-        $pdo->prepare("
+    private static function refundCredit(PDO $db, int $userId, int $productId): void {
+        $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits + 1,
                 tryon_total_used = GREATEST(tryon_total_used - 1, 0)
             WHERE id = ?
         ")->execute([$userId]);
 
-        $pdo->prepare("
+        $db->prepare("
             UPDATE tryon_logs SET result_url = 'REFUNDED'
             WHERE user_id = ? AND product_id = ? AND result_url IS NULL
             ORDER BY created_at DESC LIMIT 1
         ")->execute([$userId, $productId]);
     }
 
-    private static function updateTryonLog(
-        PDO $pdo, int $userId, int $productId, string $url
-    ): void {
-        $pdo->prepare("
+    private static function updateTryonLog(PDO $db, int $userId, int $productId, string $url): void {
+        $db->prepare("
             UPDATE tryon_logs SET result_url = ?
             WHERE user_id = ? AND product_id = ? AND result_url IS NULL
             ORDER BY created_at DESC LIMIT 1
@@ -314,7 +299,6 @@ class FashionAiController {
             'mode'          => 'balanced',
         ]);
 
-        // ─── إرسال الطلب ────────────────────────────────────
         $ch = curl_init(self::FASHN_RUN_URL);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -336,7 +320,6 @@ class FashionAiController {
         $predId = $data['id'] ?? null;
         if (!$predId) return null;
 
-        // ─── Polling ─────────────────────────────────────────
         for ($i = 0; $i < self::POLL_MAX; $i++) {
             sleep(self::POLL_INTERVAL);
 
@@ -362,7 +345,6 @@ class FashionAiController {
         return null;
     }
 
-    // ✅ التعديل الرئيسي: رفع base64 عبر JSON بدلاً من multipart
     private static function uploadToCloudinary(string $base64Image): ?string {
         $cloudName = getenv('CLOUDINARY_CLOUD_NAME');
         $apiKey    = getenv('CLOUDINARY_API_KEY');
@@ -370,12 +352,12 @@ class FashionAiController {
 
         if (!$cloudName || !$apiKey || !$apiSecret) return null;
 
-        $timestamp = time();
+        $timestamp    = time();
         $paramsToSign = "folder=vestia_tryon&timestamp={$timestamp}";
-        $signature = sha1($paramsToSign . $apiSecret);
+        $signature    = sha1($paramsToSign . $apiSecret);
 
         $payload = json_encode([
-            'file'      => $base64Image,   // data:image/jpeg;base64,....
+            'file'      => $base64Image,
             'api_key'   => $apiKey,
             'timestamp' => $timestamp,
             'signature' => $signature,
@@ -387,7 +369,7 @@ class FashionAiController {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_TIMEOUT        => 60,   // رفع الصور قد يستغرق أطول
+            CURLOPT_TIMEOUT        => 60,
             CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         ]);
         $response = curl_exec($ch);
@@ -400,8 +382,8 @@ class FashionAiController {
         return $data['secure_url'] ?? null;
     }
 
-    private static function getPairedCategories(PDO $pdo, int $categoryId): array {
-        $stmt = $pdo->prepare("
+    private static function getPairedCategories(PDO $db, int $categoryId): array {
+        $stmt = $db->prepare("
             SELECT paired_category_id FROM category_pairs WHERE category_id = ?
         ");
         $stmt->execute([$categoryId]);
