@@ -53,6 +53,21 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: #111; mar
 .sidebar-nav a:hover { color: #fff; background: rgba(255,255,255,0.07); }
 .sidebar-nav a.active { color: #fff; background: rgba(255,255,255,0.1); border-left-color: #fff; }
 .sidebar-nav a i { font-size: 17px; width: 20px; text-align: center; }
+
+/* AI nav item — توهج بنفسجي خفيف */
+.sidebar-nav a.nav-ai {
+  color: rgba(167,139,250,0.85);
+}
+.sidebar-nav a.nav-ai:hover {
+  color: #c4b5fd;
+  background: rgba(139,92,246,0.12);
+}
+.sidebar-nav a.nav-ai.active {
+  color: #c4b5fd;
+  background: rgba(139,92,246,0.18);
+  border-left-color: #8b5cf6;
+}
+
 .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 13px; color: rgba(255,255,255,0.5); }
 
 /* Main */
@@ -120,6 +135,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: #111; mar
 /* Pagination */
 .pagination .page-link { border-radius: 8px; margin: 0 2px; font-size: 13px; color: #111; border-color: var(--border); }
 .pagination .page-item.active .page-link { background: #111; border-color: #111; }
+
+/* fw helpers */
+.fw-500 { font-weight: 500; }
+.fw-600 { font-weight: 600; }
+.fw-700 { font-weight: 700; }
 </style>
 </head>
 <body>
@@ -163,11 +183,18 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: #111; mar
     <a href="/admin/users.php" class="<?= str_contains($_SERVER['PHP_SELF'], 'user') ? 'active' : '' ?>">
       <i class="bi bi-people-fill"></i> Customers
     </a>
+
+    <div class="nav-label mt-2">AI Features</div>
+    <a href="/admin/fashion_ai.php"
+       class="nav-ai <?= str_contains($_SERVER['PHP_SELF'], 'fashion_ai') ? 'active' : '' ?>">
+      <i class="bi bi-magic"></i> Fashion AI
+    </a>
+
   </nav>
 
   <div class="sidebar-footer">
     <div class="fw-600 text-white mb-1" style="font-size:13px"><?= htmlspecialchars($_SESSION['admin_name'] ?? 'Admin') ?></div>
-    <a href="/admin/logout.php" class="text-danger text-decoration-none" style="font-size:12px"><i class="bi bi-box-arrow-right me-1"></i>Logout</a>
+    <a href="/admin/logout.php" class="text-danger text-decoration-none" style="font-size:12px"><i class="bi bi-box-arrow-right me-1"></i>Logout</div>
   </div>
 </div>
 
