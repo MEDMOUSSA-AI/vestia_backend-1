@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (PostgreSQL)
+// VESTIA — FashionAiController.php (v7 — AI Color Suggestions + Admin Pairings)
 // ============================================================
 
 class FashionAiController {
@@ -21,14 +21,14 @@ class FashionAiController {
         5 => 'tops',      // Jackets
         6 => 'tops',      // Dresses
     ];
-    // 1=All و 4=Shoes لا تدعم التجربة الافتراضية
-    private const UNSUPPORTED_CATEGORIES = [1, 4];
+    private const UNSUPPORTED_CATEGORIES = [1, 4]; // All, Shoes
 
     private const FREE_CREDITS         = 2;
     private const CREDITS_PER_PURCHASE = 3;
 
     // ══════════════════════════════════════════════════════════
-    // SUGGEST
+    // SUGGEST — أولوية: Admin Pairings → AI بالألوان
+    // GET /fashion/suggest?product_id=X
     // ══════════════════════════════════════════════════════════
     public static function suggest(): void {
         $db = getDB();
@@ -38,45 +38,44 @@ class FashionAiController {
         if (!$productId) jsonError('product_id مطلوب');
 
         $stmt = $db->prepare("
-            SELECT category_id FROM products WHERE id = ? AND is_active = 1
+            SELECT category_id, color FROM products WHERE id = ? AND is_active = 1
         ");
         $stmt->execute([$productId]);
         $product = $stmt->fetch();
         if (!$product) jsonError('المنتج غير موجود', 404);
 
-        $pairedCategories = self::getPairedCategories($db, $product['category_id']);
-        $pairedCategories = array_values(array_filter(
-            $pairedCategories,
-            fn($id) => !in_array($id, self::UNSUPPORTED_CATEGORIES)
-        ));
-
-        if (empty($pairedCategories)) {
-            jsonSuccess(['suggestions' => []], 'لا توجد اقتراحات لهذه الفئة');
-        }
-
-        $placeholders = implode(',', array_fill(0, count($pairedCategories), '?'));
+        // 1) ابحث في التطابقات اليدوية من الأدمن
         $stmt = $db->prepare("
-            SELECT id, name, name_ar, name_fr, price, image_url, category_id
-            FROM products
-            WHERE category_id IN ($placeholders)
-              AND is_active = 1
-              AND id != ?
-            ORDER BY RANDOM()
-            LIMIT 4
+            SELECT p.id, p.name, p.name_ar, p.name_fr,
+                   p.price, p.image_url, p.category_id
+            FROM product_pairings pp
+            JOIN products p ON p.id = pp.paired_id
+            WHERE pp.product_id = ?
+              AND pp.is_active  = true
+              AND p.is_active   = 1
+            ORDER BY pp.score DESC
+            LIMIT 6
         ");
-        $stmt->execute([...$pairedCategories, $productId]);
+        $stmt->execute([$productId]);
         $suggestions = $stmt->fetchAll();
+
+        // 2) إن لم توجد — AI بناءً على اللون والفئة
+        if (empty($suggestions)) {
+            $suggestions = self::getAiSuggestions($db, $productId, $product);
+        }
 
         foreach ($suggestions as &$s) {
             $s['image_url'] = fixImageUrl($s['image_url']);
             $s['price']     = (float)$s['price'];
         }
+        unset($s);
 
-        jsonSuccess(['suggestions' => $suggestions]);
+        jsonSuccess(['suggestions' => array_values($suggestions)]);
     }
 
     // ══════════════════════════════════════════════════════════
-    // TRYON
+    // TRYON — ثوب واحد
+    // POST /fashion/tryon
     // ══════════════════════════════════════════════════════════
     public static function tryon(): void {
         $db   = getDB();
@@ -128,7 +127,8 @@ class FashionAiController {
     }
 
     // ══════════════════════════════════════════════════════════
-    // OUTFIT
+    // OUTFIT — ثوبان معاً
+    // POST /fashion/outfit
     // ══════════════════════════════════════════════════════════
     public static function outfit(): void {
         $db   = getDB();
@@ -235,10 +235,106 @@ class FashionAiController {
     }
 
     // ══════════════════════════════════════════════════════════
+    // ADD PAIRING — Admin يربط منتجَين يدوياً
+    // POST /admin/fashion/pairings
+    // body: { product_id, paired_id, score? }
+    // ══════════════════════════════════════════════════════════
+    public static function addPairing(): void {
+        $db   = getDB();
+        $body = getRequestBody();
+
+        $productId = (int)($body['product_id'] ?? 0);
+        $pairedId  = (int)($body['paired_id']  ?? 0);
+        $score     = min(1.0, max(0.0, (float)($body['score'] ?? 0.9)));
+
+        if (!$productId || !$pairedId) jsonError('product_id و paired_id مطلوبان');
+        if ($productId === $pairedId)  jsonError('لا يمكن ربط المنتج بنفسه');
+
+        $db->prepare("
+            INSERT INTO product_pairings (product_id, paired_id, score, source)
+            VALUES (?, ?, ?, 'admin')
+            ON CONFLICT (product_id, paired_id)
+            DO UPDATE SET score = EXCLUDED.score, is_active = true
+        ")->execute([$productId, $pairedId, $score]);
+
+        // ربط عكسي تلقائي
+        $db->prepare("
+            INSERT INTO product_pairings (product_id, paired_id, score, source)
+            VALUES (?, ?, ?, 'admin')
+            ON CONFLICT (product_id, paired_id)
+            DO UPDATE SET score = EXCLUDED.score, is_active = true
+        ")->execute([$pairedId, $productId, round($score * 0.9, 2)]);
+
+        jsonSuccess(['message' => 'تم ربط المنتجَين بنجاح']);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // REMOVE PAIRING — Admin يلغي ربط منتجَين
+    // DELETE /admin/fashion/pairings
+    // body: { product_id, paired_id }
+    // ══════════════════════════════════════════════════════════
+    public static function removePairing(): void {
+        $db   = getDB();
+        $body = getRequestBody();
+
+        $productId = (int)($body['product_id'] ?? 0);
+        $pairedId  = (int)($body['paired_id']  ?? 0);
+
+        if (!$productId || !$pairedId) jsonError('product_id و paired_id مطلوبان');
+
+        $db->prepare("
+            UPDATE product_pairings SET is_active = false
+            WHERE (product_id = ? AND paired_id = ?)
+               OR (product_id = ? AND paired_id = ?)
+        ")->execute([$productId, $pairedId, $pairedId, $productId]);
+
+        jsonSuccess(['message' => 'تم إلغاء الربط']);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // PRIVATE — AI اقتراح بناءً على اللون والفئة
+    // ══════════════════════════════════════════════════════════
+    private static function getAiSuggestions(PDO $db, int $productId, array $product): array {
+        $pairedCategories = self::getPairedCategories($db, $product['category_id']);
+        $pairedCategories = array_values(array_filter(
+            $pairedCategories,
+            fn($id) => !in_array($id, self::UNSUPPORTED_CATEGORIES)
+        ));
+
+        if (empty($pairedCategories)) return [];
+
+        $placeholders = implode(',', array_fill(0, count($pairedCategories), '?'));
+        $color = $product['color'] ?? '';
+
+        $stmt = $db->prepare("
+            SELECT p.id, p.name, p.name_ar, p.name_fr,
+                   p.price, p.image_url, p.category_id,
+                   CASE
+                       WHEN ? != '' AND EXISTS (
+                           SELECT 1 FROM color_rules cr
+                           WHERE cr.base_color = ?
+                             AND cr.complementary_color = p.color
+                       ) THEN 1.0
+                       WHEN p.color IS NOT NULL AND p.color != ? THEN 0.5
+                       ELSE 0.2
+                   END AS score
+            FROM products p
+            WHERE p.category_id IN ($placeholders)
+              AND p.is_active = 1
+              AND p.id != ?
+            ORDER BY score DESC, RANDOM()
+            LIMIT 4
+        ");
+
+        $params = array_merge([$color, $color, $color], $pairedCategories, [$productId]);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    // ══════════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════
 
-    // RETURNING يعمل في PostgreSQL — atomic update + read في استعلام واحد
     private static function checkAndDeductCredit(PDO $db, int $userId, int $productId): void {
         $stmt = $db->prepare("
             UPDATE users
@@ -265,7 +361,6 @@ class FashionAiController {
         ]);
     }
 
-    // GREATEST() يعمل في PostgreSQL
     private static function refundCredit(PDO $db, int $userId, int $productId): void {
         $db->prepare("
             UPDATE users
@@ -274,7 +369,6 @@ class FashionAiController {
             WHERE id = ?
         ")->execute([$userId]);
 
-        // PostgreSQL يدعم ORDER BY + LIMIT في subquery داخل UPDATE
         $db->prepare("
             UPDATE tryon_logs SET result_url = 'REFUNDED'
             WHERE id = (
