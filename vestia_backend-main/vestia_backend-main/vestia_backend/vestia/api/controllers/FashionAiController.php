@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v5 — getDB() fix)
+// VESTIA — FashionAiController.php
 // ============================================================
 
 class FashionAiController {
@@ -161,6 +161,7 @@ class FashionAiController {
 
         self::checkAndDeductCredit($db, $user['id'], $productId);
 
+        // tops أولاً ثم bottoms
         usort($products, fn($a, $b) =>
             (self::CATEGORY_MAP[$a['category_id']] === 'tops' ? 0 : 1) -
             (self::CATEGORY_MAP[$b['category_id']] === 'tops' ? 0 : 1)
@@ -235,52 +236,67 @@ class FashionAiController {
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════
 
+    // ✅ [إصلاح SQLite] استبدال RETURNING بـ استعلامين منفصلين
     private static function checkAndDeductCredit(PDO $db, int $userId, int $productId): void {
-        $stmt = $db->prepare("
+        // 1) اقرأ الرصيد الحالي
+        $stmt = $db->prepare("SELECT tryon_credits FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $before = (int)($stmt->fetchColumn() ?? 0);
+
+        if ($before <= 0) {
+            jsonError('انتهت تجاربك المجانية، اشترِ منتجاً للحصول على 3 تجارب جديدة', 403);
+        }
+
+        // 2) اخصم بشرط tryon_credits > 0 لتجنّب السباق
+        $updated = $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits - 1,
                 tryon_total_used = tryon_total_used + 1
             WHERE id = ? AND tryon_credits > 0
-            RETURNING tryon_credits, tryon_total_used
         ");
-        $stmt->execute([$userId]);
-        $result = $stmt->fetch();
+        $updated->execute([$userId]);
 
-        if (!$result) {
+        // إذا لم يحدّث أي صف (race condition) — أوقف العملية
+        if ($updated->rowCount() === 0) {
             jsonError('انتهت تجاربك المجانية، اشترِ منتجاً للحصول على 3 تجارب جديدة', 403);
         }
 
+        // 3) سجّل في tryon_logs
         $db->prepare("
             INSERT INTO tryon_logs (user_id, product_id, credits_before, credits_after)
             VALUES (?, ?, ?, ?)
-        ")->execute([
-            $userId,
-            $productId,
-            $result['tryon_credits'] + 1,
-            $result['tryon_credits'],
-        ]);
+        ")->execute([$userId, $productId, $before, $before - 1]);
     }
 
+    // ✅ [إصلاح SQLite] استبدال GREATEST() بـ MAX() واستخدام subquery في UPDATE
     private static function refundCredit(PDO $db, int $userId, int $productId): void {
         $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits + 1,
-                tryon_total_used = GREATEST(tryon_total_used - 1, 0)
+                tryon_total_used = MAX(tryon_total_used - 1, 0)
             WHERE id = ?
         ")->execute([$userId]);
 
+        // ✅ [إصلاح SQLite] ORDER BY + LIMIT داخل UPDATE غير مدعوم — نستخدم subquery
         $db->prepare("
             UPDATE tryon_logs SET result_url = 'REFUNDED'
-            WHERE user_id = ? AND product_id = ? AND result_url IS NULL
-            ORDER BY created_at DESC LIMIT 1
+            WHERE id = (
+                SELECT id FROM tryon_logs
+                WHERE user_id = ? AND product_id = ? AND result_url IS NULL
+                ORDER BY created_at DESC LIMIT 1
+            )
         ")->execute([$userId, $productId]);
     }
 
+    // ✅ [إصلاح SQLite] نفس إصلاح ORDER BY + LIMIT في UPDATE
     private static function updateTryonLog(PDO $db, int $userId, int $productId, string $url): void {
         $db->prepare("
             UPDATE tryon_logs SET result_url = ?
-            WHERE user_id = ? AND product_id = ? AND result_url IS NULL
-            ORDER BY created_at DESC LIMIT 1
+            WHERE id = (
+                SELECT id FROM tryon_logs
+                WHERE user_id = ? AND product_id = ? AND result_url IS NULL
+                ORDER BY created_at DESC LIMIT 1
+            )
         ")->execute([$url, $userId, $productId]);
     }
 
