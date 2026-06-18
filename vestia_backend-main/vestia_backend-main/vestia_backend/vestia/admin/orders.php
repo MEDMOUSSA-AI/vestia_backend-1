@@ -11,7 +11,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $status = $_POST['status'] ?? '';
     $allowed = ['Packing','Picked','In Transit','Completed','Cancelled'];
     if ($id && in_array($status, $allowed, true)) {
+
+        // ✅ جلب الحالة الحالية قبل التحديث لمنع إضافة الكريديت أكثر من مرة
+        $orderStmt = $db->prepare('SELECT user_id, status FROM orders WHERE id = ?');
+        $orderStmt->execute([$id]);
+        $existingOrder = $orderStmt->fetch();
+
         $db->prepare('UPDATE orders SET status=? WHERE id=?')->execute([$status, $id]);
+
+        // ✅ إضافة 3 تجارب للمستخدم عند اكتمال الطلب — مرة واحدة فقط
+        if ($status === 'Completed' && $existingOrder && $existingOrder['status'] !== 'Completed') {
+            $db->prepare("
+                UPDATE users
+                SET tryon_credits  = tryon_credits + 3,
+                    tryon_reset_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ")->execute([$existingOrder['user_id']]);
+        }
+
         flash('success', 'Order #' . $id . ' status updated to ' . htmlspecialchars($status));
     }
     header('Location: /admin/orders.php'); exit;
