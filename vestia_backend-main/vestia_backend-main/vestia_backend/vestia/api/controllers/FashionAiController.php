@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php
+// VESTIA — FashionAiController.php (PostgreSQL)
 // ============================================================
 
 class FashionAiController {
@@ -16,10 +16,12 @@ class FashionAiController {
     private const POLL_MAX       = 20;
 
     private const CATEGORY_MAP = [
-        2 => 'tops',
-        3 => 'bottoms',
-        5 => 'tops',
+        2 => 'tops',      // Tshirts
+        3 => 'bottoms',   // Jeans
+        5 => 'tops',      // Jackets
+        6 => 'tops',      // Dresses
     ];
+    // 1=All و 4=Shoes لا تدعم التجربة الافتراضية
     private const UNSUPPORTED_CATEGORIES = [1, 4];
 
     private const FREE_CREDITS         = 2;
@@ -236,48 +238,43 @@ class FashionAiController {
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════
 
-    // ✅ [إصلاح SQLite] استبدال RETURNING بـ استعلامين منفصلين
+    // RETURNING يعمل في PostgreSQL — atomic update + read في استعلام واحد
     private static function checkAndDeductCredit(PDO $db, int $userId, int $productId): void {
-        // 1) اقرأ الرصيد الحالي
-        $stmt = $db->prepare("SELECT tryon_credits FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        $before = (int)($stmt->fetchColumn() ?? 0);
-
-        if ($before <= 0) {
-            jsonError('انتهت تجاربك المجانية، اشترِ منتجاً للحصول على 3 تجارب جديدة', 403);
-        }
-
-        // 2) اخصم بشرط tryon_credits > 0 لتجنّب السباق
-        $updated = $db->prepare("
+        $stmt = $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits - 1,
                 tryon_total_used = tryon_total_used + 1
             WHERE id = ? AND tryon_credits > 0
+            RETURNING tryon_credits, tryon_total_used
         ");
-        $updated->execute([$userId]);
+        $stmt->execute([$userId]);
+        $result = $stmt->fetch();
 
-        // إذا لم يحدّث أي صف (race condition) — أوقف العملية
-        if ($updated->rowCount() === 0) {
+        if (!$result) {
             jsonError('انتهت تجاربك المجانية، اشترِ منتجاً للحصول على 3 تجارب جديدة', 403);
         }
 
-        // 3) سجّل في tryon_logs
         $db->prepare("
             INSERT INTO tryon_logs (user_id, product_id, credits_before, credits_after)
             VALUES (?, ?, ?, ?)
-        ")->execute([$userId, $productId, $before, $before - 1]);
+        ")->execute([
+            $userId,
+            $productId,
+            $result['tryon_credits'] + 1,
+            $result['tryon_credits'],
+        ]);
     }
 
-    // ✅ [إصلاح SQLite] استبدال GREATEST() بـ MAX() واستخدام subquery في UPDATE
+    // GREATEST() يعمل في PostgreSQL
     private static function refundCredit(PDO $db, int $userId, int $productId): void {
         $db->prepare("
             UPDATE users
             SET tryon_credits    = tryon_credits + 1,
-                tryon_total_used = MAX(tryon_total_used - 1, 0)
+                tryon_total_used = GREATEST(tryon_total_used - 1, 0)
             WHERE id = ?
         ")->execute([$userId]);
 
-        // ✅ [إصلاح SQLite] ORDER BY + LIMIT داخل UPDATE غير مدعوم — نستخدم subquery
+        // PostgreSQL يدعم ORDER BY + LIMIT في subquery داخل UPDATE
         $db->prepare("
             UPDATE tryon_logs SET result_url = 'REFUNDED'
             WHERE id = (
@@ -288,7 +285,6 @@ class FashionAiController {
         ")->execute([$userId, $productId]);
     }
 
-    // ✅ [إصلاح SQLite] نفس إصلاح ORDER BY + LIMIT في UPDATE
     private static function updateTryonLog(PDO $db, int $userId, int $productId, string $url): void {
         $db->prepare("
             UPDATE tryon_logs SET result_url = ?
