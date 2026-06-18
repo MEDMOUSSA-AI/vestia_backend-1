@@ -103,6 +103,10 @@ match(true) {
     $resource === 'fashion' && $method === 'POST' && $id === 'tryon'   => FashionAiController::tryon(),
     $resource === 'fashion' && $method === 'POST' && $id === 'outfit'  => FashionAiController::outfit(),
 
+    // ── Fashion AI — Admin ──
+    $resource === 'admin' && $id === 'fashion' && $sub === 'pairings' && $method === 'POST'   => FashionAiController::addPairing(),
+    $resource === 'admin' && $id === 'fashion' && $sub === 'pairings' && $method === 'DELETE' => FashionAiController::removePairing(),
+
     // ── 404 ──
     default => jsonError('Endpoint not found', 404),
 };
