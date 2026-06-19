@@ -194,7 +194,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: #111; mar
 
   <div class="sidebar-footer">
     <div class="fw-600 text-white mb-1" style="font-size:13px"><?= htmlspecialchars($_SESSION['admin_name'] ?? 'Admin') ?></div>
-    <a href="/admin/logout.php" class="text-danger text-decoration-none" style="font-size:12px"><i class="bi bi-box-arrow-right me-1"></i>Logout</div>
+    <a href="/admin/logout.php" class="text-danger text-decoration-none" style="font-size:12px"><i class="bi bi-box-arrow-right me-1"></i>Logout</a>
   </div>
 </div>
 
