@@ -1,10 +1,8 @@
 <?php
-
-session_start();
-require_once __DIR__ . '/includes/db.php';
-
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
+session_start();
+require_once __DIR__ . '/includes/db.php';
 adminCheck();
 $db = db();
 
@@ -148,7 +146,7 @@ $topProducts = $db->query("
 
 // المستخدمون مع الكريدت
 $users = $db->query("
-    SELECT id, name, email, tryon_credits, tryon_total_used
+    SELECT id, name, phone, tryon_credits, tryon_total_used
     FROM users
     ORDER BY tryon_total_used DESC
     LIMIT 30
@@ -702,7 +700,7 @@ include __DIR__ . '/includes/header.php';
                             <?php foreach ($users as $u): ?>
                                 <option value="<?= (int)$u['id'] ?>">
                                     <?= htmlspecialchars($u['name']) ?>
-                                    (<?= htmlspecialchars($u['email']) ?>)
+                                    (<?= htmlspecialchars($u['phone']) ?>)
                                     — رصيد: <?= (int)$u['tryon_credits'] ?>
                                 </option>
                             <?php endforeach; ?>
@@ -747,7 +745,7 @@ include __DIR__ . '/includes/header.php';
                             <td style="font-size:12px;color:#9ca3af"><?= (int)$u['id'] ?></td>
                             <td>
                                 <div class="fw-600" style="font-size:13px"><?= htmlspecialchars($u['name']) ?></div>
-                                <div style="font-size:11px;color:#9ca3af"><?= htmlspecialchars($u['email']) ?></div>
+                                <div style="font-size:11px;color:#9ca3af"><?= htmlspecialchars($u['phone']) ?></div>
                             </td>
                             <td>
                                 <?php $c = (int)$u['tryon_credits']; ?>
