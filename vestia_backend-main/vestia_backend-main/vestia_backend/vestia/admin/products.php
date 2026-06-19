@@ -69,6 +69,25 @@ function uploadToCloudinary(string $fileTmpPath, string $originalName): string|f
     return $data['secure_url'] ?? false;
 }
 
+// ── قائمة الألوان المتاحة (نفس قائمة fashion_ai) ──────────
+$colorOptions = [
+    'black'  => '#111827',
+    'white'  => '#f9fafb',
+    'navy'   => '#1e3a5f',
+    'gray'   => '#9ca3af',
+    'beige'  => '#d4b896',
+    'brown'  => '#7c5c3e',
+    'camel'  => '#c19a6b',
+    'green'  => '#16a34a',
+    'pink'   => '#ec4899',
+    'red'    => '#dc2626',
+    'blue'   => '#3b82f6',
+    'yellow' => '#eab308',
+    'orange' => '#f97316',
+    'purple' => '#8b5cf6',
+    'striped'=> null,
+];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrf();
     $action = $_POST['action'] ?? '';
@@ -82,6 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $descFr = sanitize($_POST['description_fr'] ?? '');
         $catId  = (int)($_POST['category_id'] ?? 0) ?: null;
         $price  = (float)($_POST['price'] ?? 0);
+        $color  = strtolower(trim(sanitize($_POST['color'] ?? ''))) ?: null;
 
         // ✅ التحقق من الطول والسعر
         if (strlen($name) > 200) {
@@ -141,13 +161,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->prepare(
                     'INSERT INTO products
                     (category_id, name, name_ar, name_fr, description, description_ar, description_fr,
-                     price, old_price, image_url, sizes, stock_count, offer_ends_at, is_active)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                     price, old_price, image_url, sizes, stock_count, offer_ends_at, is_active, color)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                 )->execute([
                     $catId, $name, $nameAr ?: null, $nameFr ?: null,
                     $desc,  $descAr ?: null, $descFr ?: null,
                     $price, $oldPrice, $imageUrl, $sizes,
-                    $stockCount, $offerEndsAt, $isActive,
+                    $stockCount, $offerEndsAt, $isActive, $color,
                 ]);
                 flash('success', 'تمت إضافة المنتج بنجاح! ✅');
             } else {
@@ -161,13 +181,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET category_id=?, name=?, name_ar=?, name_fr=?,
                         description=?, description_ar=?, description_fr=?,
                         price=?, old_price=?, image_url=?, sizes=?,
-                        stock_count=?, offer_ends_at=?, is_active=?
+                        stock_count=?, offer_ends_at=?, is_active=?, color=?
                     WHERE id=?'
                 )->execute([
                     $catId, $name, $nameAr ?: null, $nameFr ?: null,
                     $desc,  $descAr ?: null, $descFr ?: null,
                     $price, $oldPrice, $imageUrl, $sizes,
-                    $stockCount, $offerEndsAt, $isActive, $id,
+                    $stockCount, $offerEndsAt, $isActive, $color, $id,
                 ]);
                 flash('success', 'تم تحديث المنتج! ✅');
             }
@@ -249,6 +269,21 @@ include __DIR__ . '/includes/header.php';
 .stock-high  { background: #dcfce7; color: #166534; }
 .stock-low   { background: #fef08a; color: #b45309; }
 .stock-empty { background: #fee2e2; color: #991b1b; }
+
+/* ── لوحة الألوان ── */
+.color-dot {
+    display: inline-block;
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid #d1d5db; vertical-align: middle;
+    margin-right: 4px;
+}
+.color-pick-btn {
+    padding: 6px 12px; border: 2px solid #e5e7eb; border-radius: 8px;
+    font-size: 12px; font-weight: 600; background: #fff; cursor: pointer;
+    transition: all .15s;
+}
+.color-pick-btn:hover { border-color: #9ca3af; }
+.color-pick-btn.selected { border-color: #111827; background: #f3f4f6; }
 </style>
 
 <?php $succ=flash('success'); $err=flash('error'); ?>
@@ -338,6 +373,31 @@ include __DIR__ . '/includes/header.php';
               <input type="number" name="old_price" class="form-control" step="0.01" min="0" max="9999999"
                      value="<?= htmlspecialchars($editProduct['old_price'] ?? '') ?>" placeholder="اختياري">
             </div>
+          </div>
+
+          <!-- ── اختيار اللون ── -->
+          <div class="mb-3">
+            <label class="form-label"><i class="bi bi-palette me-1" style="color:#8b5cf6"></i>اللون</label>
+            <div class="row g-2 mb-2" id="colorPalette">
+              <?php foreach ($colorOptions as $cname => $chex): ?>
+                <div class="col-auto">
+                  <button type="button"
+                          class="color-pick-btn <?= ($editProduct['color'] ?? '') === $cname ? 'selected' : '' ?>"
+                          onclick="pickColor('<?= $cname ?>', this)"
+                          title="<?= $cname ?>">
+                    <?php if ($chex): ?>
+                      <span class="color-dot" style="background:<?= $chex ?>;<?= $cname === 'white' ? 'border-color:#d1d5db' : '' ?>"></span>
+                    <?php else: ?>
+                      〰
+                    <?php endif; ?>
+                    <?= $cname ?>
+                  </button>
+                </div>
+              <?php endforeach; ?>
+            </div>
+            <input type="text" name="color" id="colorInput" class="form-control"
+                   value="<?= htmlspecialchars($editProduct['color'] ?? '') ?>"
+                   placeholder="أو اكتب اللون يدوياً: black, white, navy...">
           </div>
 
           <div class="mb-3">
@@ -454,12 +514,13 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover">
           <thead class="table-light">
             <tr>
-              <th>المنتج</th><th>العربية</th><th>الفئة</th><th>السعر</th><th>المخزون</th><th>العرض</th><th>الحالة</th><th>الإجراءات</th>
+              <th>المنتج</th><th>العربية</th><th>الفئة</th><th>اللون</th><th>السعر</th><th>المخزون</th><th>العرض</th><th>الحالة</th><th>الإجراءات</th>
             </tr>
           </thead>
           <tbody>
           <?php foreach ($products as $p):
             $timeStatus = getTimeRemaining($p['offer_ends_at']);
+            $pColorHex  = $colorOptions[$p['color'] ?? ''] ?? null;
           ?>
             <tr>
               <td>
@@ -489,6 +550,18 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
               </td>
               <td style="font-size:13px"><?= htmlspecialchars($p['cat_name'] ?? '—') ?></td>
+              <td style="font-size:12px">
+                <?php if (!empty($p['color'])): ?>
+                  <span style="display:inline-flex;align-items:center;gap:5px">
+                    <?php if ($pColorHex): ?>
+                      <span class="color-dot" style="background:<?= $pColorHex ?>"></span>
+                    <?php endif; ?>
+                    <?= htmlspecialchars($p['color']) ?>
+                  </span>
+                <?php else: ?>
+                  <span style="color:#d1d5db">—</span>
+                <?php endif; ?>
+              </td>
               <td>
                 <div class="fw-700"><?= formatPrice((float)$p['price']) ?></div>
                 <?php if ($p['old_price']): ?>
@@ -539,7 +612,7 @@ include __DIR__ . '/includes/header.php';
             </tr>
           <?php endforeach; ?>
           <?php if (empty($products)): ?>
-            <tr><td colspan="8" class="text-center text-muted py-4">لا توجد منتجات</td></tr>
+            <tr><td colspan="9" class="text-center text-muted py-4">لا توجد منتجات</td></tr>
           <?php endif; ?>
           </tbody>
         </table>
@@ -638,6 +711,12 @@ function updateOfferStatus() {
     }
   }
   statusDiv.style.display = 'block';
+}
+
+function pickColor(name, btn) {
+  document.getElementById('colorInput').value = name;
+  document.querySelectorAll('.color-pick-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
 }
 
 document.getElementById('productForm').addEventListener('submit', function () {
