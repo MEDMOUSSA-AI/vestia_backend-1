@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v8 — FASHN /run model_name+inputs fix)
+// VESTIA — FashionAiController.php (v9 — surface FASHN input errors like PoseError)
 // ============================================================
 
 class FashionAiController {
@@ -116,10 +116,11 @@ class FashionAiController {
         $garmentUrl = fixImageUrl($product['image_url']);
         $category   = self::CATEGORY_MAP[$product['category_id']] ?? 'tops';
 
-        $resultUrl = self::submitAndPoll($personUrl, $garmentUrl, $category);
+        $errorInfo = null;
+        $resultUrl = self::submitAndPoll($personUrl, $garmentUrl, $category, $errorInfo);
         if (!$resultUrl) {
             self::refundCredit($db, $user['id'], $productId);
-            jsonError('فشل في معالجة الصورة، حاول مجدداً', 500);
+            self::handleTryonFailure($errorInfo);
         }
 
         self::updateTryonLog($db, $user['id'], $productId, $resultUrl);
@@ -177,25 +178,29 @@ class FashionAiController {
         }
 
         $cat1         = self::CATEGORY_MAP[$products[0]['category_id']] ?? 'tops';
+        $errorInfo    = null;
         $intermediate = self::submitAndPoll(
             $personUrl,
             fixImageUrl($products[0]['image_url']),
-            $cat1
+            $cat1,
+            $errorInfo
         );
         if (!$intermediate) {
             self::refundCredit($db, $user['id'], $productId);
-            jsonError('فشل في معالجة الثوب الأول', 500);
+            self::handleTryonFailure($errorInfo);
         }
 
-        $cat2  = self::CATEGORY_MAP[$products[1]['category_id']] ?? 'bottoms';
-        $final = self::submitAndPoll(
+        $cat2      = self::CATEGORY_MAP[$products[1]['category_id']] ?? 'bottoms';
+        $errorInfo = null;
+        $final     = self::submitAndPoll(
             $intermediate,
             fixImageUrl($products[1]['image_url']),
-            $cat2
+            $cat2,
+            $errorInfo
         );
         if (!$final) {
             self::refundCredit($db, $user['id'], $productId);
-            jsonError('فشل في معالجة الثوب الثاني', 500);
+            self::handleTryonFailure($errorInfo);
         }
 
         self::updateTryonLog($db, $user['id'], $productId, $final);
@@ -392,14 +397,34 @@ class FashionAiController {
     }
 
     // ══════════════════════════════════════════════════════════
+    // ✅ جديد: تحويل خطأ FASHN إلى رسالة واضحة للمستخدم
+    // معروف حالياً: PoseError — لم يستطع التعرف على وضعية الجسم
+    // أي خطأ آخر غير معروف يبقى برسالة عامة (500) كما كان سابقاً
+    // ══════════════════════════════════════════════════════════
+    private static function handleTryonFailure(?array $errorInfo): void {
+        $name = $errorInfo['name'] ?? '';
+
+        if ($name === 'PoseError') {
+            jsonError(
+                'تعذّر التعرف على وضعية جسمك في الصورة، يرجى استخدام صورة واضحة كاملة الطول وأنت واقف بشكل مستقيم مع إضاءة جيدة',
+                422
+            );
+        }
+
+        jsonError('فشل في معالجة الصورة، حاول مجدداً', 500);
+    }
+
+    // ══════════════════════════════════════════════════════════
     // ✅ FIXED: submitAndPoll — payload الآن بصيغة model_name + inputs
     // FASHN غيّرت بنية /v1/run لتصبح موحّدة لكل الموديلات:
     // { "model_name": "...", "inputs": { ...الحقول القديمة... } }
+    // ✅ جديد: $errorOut — يُعبّأ بتفاصيل خطأ FASHN عند الفشل (مثل PoseError)
     // ══════════════════════════════════════════════════════════
     private static function submitAndPoll(
         string $personUrl,
         string $garmentUrl,
-        string $category
+        string $category,
+        ?array &$errorOut = null
     ): ?string {
         $apiKey = getenv('FASHN_API_KEY');
         if (!$apiKey) {
@@ -463,7 +488,11 @@ class FashionAiController {
             error_log('[VESTIA:FASHN:poll] i=' . $i . ' status=' . $status . ' response=' . substr($response, 0, 300));
 
             if ($status === 'completed') return $data['output'][0] ?? null;
-            if ($status === 'failed')    return null;
+            if ($status === 'failed') {
+                // ✅ نمرّر تفاصيل الخطأ للمستدعي بدل تضييعها
+                $errorOut = $data['error'] ?? null;
+                return null;
+            }
         }
 
         return null;
