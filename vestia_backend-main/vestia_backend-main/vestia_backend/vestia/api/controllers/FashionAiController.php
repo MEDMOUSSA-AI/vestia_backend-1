@@ -451,6 +451,9 @@ class FashionAiController {
         return null;
     }
 
+    // ══════════════════════════════════════════════════════════
+    // ✅ FIXED: uploadToCloudinary — multipart/form-data بدل JSON
+    // ══════════════════════════════════════════════════════════
     private static function uploadToCloudinary(string $base64Image): ?string {
         $cloudName = getenv('CLOUDINARY_CLOUD_NAME');
         $apiKey    = getenv('CLOUDINARY_API_KEY');
@@ -462,21 +465,23 @@ class FashionAiController {
         $paramsToSign = "folder=vestia_tryon&timestamp={$timestamp}";
         $signature    = sha1($paramsToSign . $apiSecret);
 
-        $payload = json_encode([
+        // ✅ array عادي — cURL يرسله multipart/form-data تلقائياً
+        // Cloudinary لا يقبل base64 عبر JSON، يقبله فقط عبر form-data
+        $payload = [
             'file'      => $base64Image,
             'api_key'   => $apiKey,
             'timestamp' => $timestamp,
             'signature' => $signature,
             'folder'    => 'vestia_tryon',
-        ]);
+        ];
 
         $ch = curl_init(sprintf(self::CLOUDINARY_UPLOAD_URL, $cloudName));
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_POSTFIELDS     => $payload,  // ✅ array مباشرة بدون json_encode
             CURLOPT_TIMEOUT        => 60,
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+            // ✅ بدون Content-Type header — cURL يضبطها على multipart/form-data تلقائياً
         ]);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
