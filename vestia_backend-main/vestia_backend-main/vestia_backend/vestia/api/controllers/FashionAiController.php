@@ -459,7 +459,10 @@ class FashionAiController {
         $apiKey    = getenv('CLOUDINARY_API_KEY');
         $apiSecret = getenv('CLOUDINARY_API_SECRET');
 
-        if (!$cloudName || !$apiKey || !$apiSecret) return null;
+        if (!$cloudName || !$apiKey || !$apiSecret) {
+            error_log('[VESTIA:Cloudinary] MISSING ENV — cloud=' . ($cloudName ? 'ok' : 'MISSING') . ' key=' . ($apiKey ? 'ok' : 'MISSING') . ' secret=' . ($apiSecret ? 'ok' : 'MISSING'));
+            return null;
+        }
 
         $timestamp    = time();
         $paramsToSign = "folder=vestia_tryon&timestamp={$timestamp}";
@@ -479,13 +482,15 @@ class FashionAiController {
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,  // ✅ array مباشرة بدون json_encode
+            CURLOPT_POSTFIELDS     => $payload,
             CURLOPT_TIMEOUT        => 60,
-            // ✅ بدون Content-Type header — cURL يضبطها على multipart/form-data تلقائياً
         ]);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        // DEBUG — سيظهر في Render logs
+        error_log('[VESTIA:Cloudinary] HTTP=' . $httpCode . ' response=' . substr($response, 0, 300));
 
         if ($httpCode !== 200) return null;
 
