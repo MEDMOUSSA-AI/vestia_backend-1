@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v9 — surface FASHN input errors like PoseError)
+// VESTIA — FashionAiController.php
 // ============================================================
 
 class FashionAiController {
@@ -26,6 +26,29 @@ class FashionAiController {
 
     private const FREE_CREDITS         = 2;
     private const CREDITS_PER_PURCHASE = 3;
+
+    // ══════════════════════════════════════════════════════════
+    // INIT CREDITS — منح 2 محاولة عند إنشاء الحساب
+    // استدعِها في register.php بعد INSERT للمستخدم الجديد:
+    //   FashionAiController::initCredits($userId);
+    // ══════════════════════════════════════════════════════════
+    public static function initCredits(int $userId): void {
+        $db = getDB();
+        $db->prepare("
+            UPDATE users
+            SET tryon_credits    = ?,
+                tryon_total_used = 0
+            WHERE id = ? AND tryon_credits IS NULL
+        ")->execute([self::FREE_CREDITS, $userId]);
+
+        // إذا كان العمود NULL قبل التحديث لم تؤثر الاستعلام — نتأكد بـ fallback
+        $db->prepare("
+            UPDATE users
+            SET tryon_credits    = COALESCE(tryon_credits, ?),
+                tryon_total_used = COALESCE(tryon_total_used, 0)
+            WHERE id = ?
+        ")->execute([self::FREE_CREDITS, $userId]);
+    }
 
     // ══════════════════════════════════════════════════════════
     // SUGGEST — أولوية: Admin Pairings → AI بالألوان
@@ -210,6 +233,9 @@ class FashionAiController {
 
     // ══════════════════════════════════════════════════════════
     // GET CREDITS
+    // GET /fashion/credits
+    // ✅ مدمج من tryon_credits.php — key مصحَّح إلى `remaining`
+    //    ليتطابق مع ما يتوقعه Flutter: data['remaining']
     // ══════════════════════════════════════════════════════════
     public static function getCredits(): void {
         $db   = getDB();
@@ -221,14 +247,23 @@ class FashionAiController {
         $stmt->execute([$user['id']]);
         $data = $stmt->fetch();
 
+        // إذا كان الحساب قديماً ولم يُعطَ رصيد بعد → امنحه افتراضياً
+        if ($data && $data['tryon_credits'] === null) {
+            self::initCredits($user['id']);
+            $data['tryon_credits']   = self::FREE_CREDITS;
+            $data['tryon_total_used'] = 0;
+        }
+
         jsonSuccess([
-            'credits_remaining' => (int)($data['tryon_credits']   ?? 0),
-            'total_used'        => (int)($data['tryon_total_used'] ?? 0),
+            'remaining'  => (int)($data['tryon_credits']    ?? 0),
+            'total_used' => (int)($data['tryon_total_used']  ?? 0),
         ]);
     }
 
     // ══════════════════════════════════════════════════════════
-    // ADD CREDITS AFTER PURCHASE
+    // ADD CREDITS AFTER PURCHASE — +3 بعد كل عملية شراء مكتملة
+    // استدعِها من orders.php عند تحديث الحالة إلى Completed:
+    //   FashionAiController::addCreditsAfterPurchase($userId);
     // ══════════════════════════════════════════════════════════
     public static function addCreditsAfterPurchase(int $userId): void {
         $db = getDB();
@@ -243,7 +278,6 @@ class FashionAiController {
     // ══════════════════════════════════════════════════════════
     // ADD PAIRING — Admin يربط منتجَين يدوياً
     // POST /admin/fashion/pairings
-    // body: { product_id, paired_id, score? }
     // ══════════════════════════════════════════════════════════
     public static function addPairing(): void {
         $db   = getDB();
@@ -277,7 +311,6 @@ class FashionAiController {
     // ══════════════════════════════════════════════════════════
     // REMOVE PAIRING — Admin يلغي ربط منتجَين
     // DELETE /admin/fashion/pairings
-    // body: { product_id, paired_id }
     // ══════════════════════════════════════════════════════════
     public static function removePairing(): void {
         $db   = getDB();
@@ -396,11 +429,6 @@ class FashionAiController {
         ")->execute([$url, $userId, $productId]);
     }
 
-    // ══════════════════════════════════════════════════════════
-    // ✅ جديد: تحويل خطأ FASHN إلى رسالة واضحة للمستخدم
-    // معروف حالياً: PoseError — لم يستطع التعرف على وضعية الجسم
-    // أي خطأ آخر غير معروف يبقى برسالة عامة (500) كما كان سابقاً
-    // ══════════════════════════════════════════════════════════
     private static function handleTryonFailure(?array $errorInfo): void {
         $name = $errorInfo['name'] ?? '';
 
@@ -414,12 +442,6 @@ class FashionAiController {
         jsonError('فشل في معالجة الصورة، حاول مجدداً', 500);
     }
 
-    // ══════════════════════════════════════════════════════════
-    // ✅ FIXED: submitAndPoll — payload الآن بصيغة model_name + inputs
-    // FASHN غيّرت بنية /v1/run لتصبح موحّدة لكل الموديلات:
-    // { "model_name": "...", "inputs": { ...الحقول القديمة... } }
-    // ✅ جديد: $errorOut — يُعبّأ بتفاصيل خطأ FASHN عند الفشل (مثل PoseError)
-    // ══════════════════════════════════════════════════════════
     private static function submitAndPoll(
         string $personUrl,
         string $garmentUrl,
@@ -457,7 +479,6 @@ class FashionAiController {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // DEBUG
         error_log('[VESTIA:FASHN:run] HTTP=' . $httpCode . ' response=' . substr($response, 0, 400));
 
         if ($httpCode !== 200) return null;
@@ -484,12 +505,10 @@ class FashionAiController {
             $data   = json_decode($response, true);
             $status = $data['status'] ?? '';
 
-            // DEBUG
             error_log('[VESTIA:FASHN:poll] i=' . $i . ' status=' . $status . ' response=' . substr($response, 0, 300));
 
             if ($status === 'completed') return $data['output'][0] ?? null;
             if ($status === 'failed') {
-                // ✅ نمرّر تفاصيل الخطأ للمستدعي بدل تضييعها
                 $errorOut = $data['error'] ?? null;
                 return null;
             }
@@ -498,9 +517,6 @@ class FashionAiController {
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════
-    // ✅ FIXED: uploadToCloudinary — multipart/form-data بدل JSON
-    // ══════════════════════════════════════════════════════════
     private static function uploadToCloudinary(string $base64Image): ?string {
         $cloudName = getenv('CLOUDINARY_CLOUD_NAME');
         $apiKey    = getenv('CLOUDINARY_API_KEY');
@@ -515,8 +531,6 @@ class FashionAiController {
         $paramsToSign = "folder=vestia_tryon&timestamp={$timestamp}";
         $signature    = sha1($paramsToSign . $apiSecret);
 
-        // ✅ array عادي — cURL يرسله multipart/form-data تلقائياً
-        // Cloudinary لا يقبل base64 عبر JSON، يقبله فقط عبر form-data
         $payload = [
             'file'      => $base64Image,
             'api_key'   => $apiKey,
@@ -536,7 +550,6 @@ class FashionAiController {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // DEBUG — سيظهر في Render logs
         error_log('[VESTIA:Cloudinary] HTTP=' . $httpCode . ' response=' . substr($response, 0, 300));
 
         if ($httpCode !== 200) return null;
