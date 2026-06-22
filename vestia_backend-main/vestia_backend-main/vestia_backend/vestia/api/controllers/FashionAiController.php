@@ -396,7 +396,10 @@ class FashionAiController {
         string $category
     ): ?string {
         $apiKey = getenv('FASHN_API_KEY');
-        if (!$apiKey) return null;
+        if (!$apiKey) {
+            error_log('[VESTIA:FASHN] FASHN_API_KEY MISSING');
+            return null;
+        }
 
         $payload = json_encode([
             'model_image'   => $personUrl,
@@ -419,6 +422,9 @@ class FashionAiController {
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        // DEBUG
+        error_log('[VESTIA:FASHN:run] HTTP=' . $httpCode . ' response=' . substr($response, 0, 400));
 
         if ($httpCode !== 200) return null;
 
@@ -443,6 +449,9 @@ class FashionAiController {
 
             $data   = json_decode($response, true);
             $status = $data['status'] ?? '';
+
+            // DEBUG
+            error_log('[VESTIA:FASHN:poll] i=' . $i . ' status=' . $status . ' response=' . substr($response, 0, 300));
 
             if ($status === 'completed') return $data['output'][0] ?? null;
             if ($status === 'failed')    return null;
