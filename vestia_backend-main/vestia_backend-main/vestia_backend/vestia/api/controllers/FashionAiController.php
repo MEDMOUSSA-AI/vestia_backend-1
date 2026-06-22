@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// VESTIA — FashionAiController.php (v7 — AI Color Suggestions + Admin Pairings)
+// VESTIA — FashionAiController.php (v8 — FASHN /run model_name+inputs fix)
 // ============================================================
 
 class FashionAiController {
@@ -8,6 +8,7 @@ class FashionAiController {
     private const FASHN_BASE_URL   = 'https://api.fashn.ai/v1';
     private const FASHN_RUN_URL    = self::FASHN_BASE_URL . '/run';
     private const FASHN_STATUS_URL = self::FASHN_BASE_URL . '/status/';
+    private const FASHN_MODEL_NAME = 'tryon-v1.6';
 
     private const CLOUDINARY_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/%s/image/upload';
 
@@ -390,6 +391,11 @@ class FashionAiController {
         ")->execute([$url, $userId, $productId]);
     }
 
+    // ══════════════════════════════════════════════════════════
+    // ✅ FIXED: submitAndPoll — payload الآن بصيغة model_name + inputs
+    // FASHN غيّرت بنية /v1/run لتصبح موحّدة لكل الموديلات:
+    // { "model_name": "...", "inputs": { ...الحقول القديمة... } }
+    // ══════════════════════════════════════════════════════════
     private static function submitAndPoll(
         string $personUrl,
         string $garmentUrl,
@@ -402,10 +408,13 @@ class FashionAiController {
         }
 
         $payload = json_encode([
-            'model_image'   => $personUrl,
-            'garment_image' => $garmentUrl,
-            'category'      => $category,
-            'mode'          => 'balanced',
+            'model_name' => self::FASHN_MODEL_NAME,
+            'inputs'     => [
+                'model_image'   => $personUrl,
+                'garment_image' => $garmentUrl,
+                'category'      => $category,
+                'mode'          => 'balanced',
+            ],
         ]);
 
         $ch = curl_init(self::FASHN_RUN_URL);
