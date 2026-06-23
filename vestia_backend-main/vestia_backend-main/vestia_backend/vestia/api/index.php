@@ -102,6 +102,7 @@ match(true) {
     $resource === 'fashion' && $method === 'GET'  && $id === 'suggest' => FashionAiController::suggest(),
     $resource === 'fashion' && $method === 'POST' && $id === 'tryon'   => FashionAiController::tryon(),
     $resource === 'fashion' && $method === 'POST' && $id === 'outfit'  => FashionAiController::outfit(),
+    $resource === 'fashion' && $method === 'GET'  && $id === 'credits' => FashionAiController::getCredits(), // ← أضف هذا
 
     // ── Fashion AI — Admin ──
     $resource === 'admin' && $id === 'fashion' && $sub === 'pairings' && $method === 'POST'   => FashionAiController::addPairing(),
